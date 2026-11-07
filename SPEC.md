@@ -355,6 +355,8 @@ loadout/
 
 Each step is built on its own branch and merged into `main` through a Pull Request once it works. `main` always holds a working version.
 
+The detailed order, including which AI model builds each part and which parts are built in parallel, is in [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md). The table below is the feature-level overview.
+
 | # | Branch | What it adds | Done when |
 |---|---|---|---|
 | 0 | `docs/spec` | This document | You've approved it |
