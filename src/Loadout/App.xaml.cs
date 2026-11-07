@@ -41,7 +41,7 @@ public partial class App : Application
                 return;
             }
 
-            var settings = new InMemorySettingsStore();
+            var settings = new JsonSettingsStore();
             var icons = new PlaceholderIconProvider();
             var input = new PlaceholderInputService();
             _host = new AppHost(

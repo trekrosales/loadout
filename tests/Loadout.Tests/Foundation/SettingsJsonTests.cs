@@ -89,6 +89,27 @@ public class SettingsJsonTests
     }
 
     [Fact]
+    public void UnknownSlotType_OnlyEmptiesThatSlot()
+    {
+        const string json = """
+            {
+              "hotkey": { "holdDelayMs": 333 },
+              "groups": [ { "name": "Work", "slots": [
+                { "type": "script", "path": "x" },
+                { "type": "APP", "path": "C:\\a.exe" }
+              ] } ]
+            }
+            """;
+
+        var raw = SettingsJson.Deserialize(json)!;
+        var s = Loadout.Settings.Store.SettingsNormalizer.Normalize(raw);
+
+        Assert.Equal(333, s.Hotkey.HoldDelayMs);
+        Assert.Null(s.Groups[0].Slots[0]);
+        Assert.Equal(SlotType.App, s.Groups[0].Slots[1]!.Type);
+    }
+
+    [Fact]
     public void Read_IsForgiving()
     {
         const string json = """
