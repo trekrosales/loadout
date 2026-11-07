@@ -30,6 +30,20 @@ public class WheelMathTests
     }
 
     [Fact]
+    public void Measure_At96_MatchesSpec()
+    {
+        var m = WheelMath.Measure(96);
+
+        Assert.Equal(96, m.IconSize, Precision);
+        Assert.Equal(264, m.OuterRadius, Precision);
+        Assert.Equal(120, m.InnerRadius, Precision);
+        Assert.Equal(192, m.IconRingRadius, Precision);
+        Assert.Equal(48, m.CancelZoneRadius, Precision);
+        Assert.Equal(3, m.GapWidth, Precision);
+        Assert.Equal(528, m.Diameter, Precision);
+    }
+
+    [Fact]
     public void Measure_At16_CancelZoneHasMinimumOf12()
     {
         var m = WheelMath.Measure(16);
@@ -130,6 +144,21 @@ public class WheelMathTests
         Assert.Null(WheelMath.SlotFromAim(10, double.NegativeInfinity, 24));
     }
 
+    [Theory]
+    [InlineData(22.4, 0)]
+    [InlineData(67.5, 2)]
+    [InlineData(112.5, 3)]
+    [InlineData(157.5, 4)]
+    [InlineData(202.5, 5)]
+    [InlineData(247.5, 6)]
+    [InlineData(292.5, 7)]
+    public void SlotFromAim_ExactBoundaries_BelongToClockwiseSlot(double degrees, int expectedSlot)
+    {
+        var (dx, dy) = Aim(degrees, 100);
+
+        Assert.Equal<int?>(expectedSlot, WheelMath.SlotFromAim(dx, dy, 24));
+    }
+
     [Fact]
     public void SlotFromAim_NegativeCancelZone_Throws()
     {
@@ -160,6 +189,19 @@ public class WheelMathTests
     {
         Assert.Equal((0.0, 0.0), WheelMath.ClampAim(0, 0, 10));
         Assert.Equal((0.0, 0.0), WheelMath.ClampAim(0, 0, 0));
+    }
+
+    [Fact]
+    public void ClampAim_LengthExactlyEqualToMax_IsUnchanged()
+    {
+        Assert.Equal((30.0, 40.0), WheelMath.ClampAim(30, 40, 50));
+    }
+
+    [Fact]
+    public void ClampAim_NonFiniteInput_ReturnsZeroVector()
+    {
+        Assert.Equal((0.0, 0.0), WheelMath.ClampAim(double.NaN, 4, 10));
+        Assert.Equal((0.0, 0.0), WheelMath.ClampAim(3, double.PositiveInfinity, 10));
     }
 
     [Fact]
@@ -214,6 +256,13 @@ public class WheelMathTests
     }
 
     [Fact]
+    public void ClampCenter_RectangleExactlyTwoRadiiWide_CentersOnThatAxis()
+    {
+        // Width 100 equals 2 × 50, so x is centered. Height 800 is enough, so y is only clamped.
+        Assert.Equal((50.0, 400.0), WheelMath.ClampCenter(10, 400, 50, 0, 0, 100, 800));
+    }
+
+    [Fact]
     public void ClampCenter_NegativeRadius_Throws()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => WheelMath.ClampCenter(0, 0, -1, 0, 0, 100, 100));
@@ -261,6 +310,18 @@ public class WheelMathTests
     public void WrapIndex_LargeIndex_WrapsIntoRange()
     {
         Assert.Equal(1, WheelMath.WrapIndex(17, 8));
+    }
+
+    [Theory]
+    [InlineData(int.MinValue)]
+    [InlineData(int.MaxValue)]
+    public void WrapIndex_ExtremeIndex_StaysInRangeWithoutOverflow(int index)
+    {
+        int result = WheelMath.WrapIndex(index, 7);
+
+        Assert.InRange(result, 0, 6);
+        long expected = ((long)index % 7 + 7) % 7;
+        Assert.Equal(expected, result);
     }
 
     [Fact]
@@ -343,6 +404,51 @@ public class WheelMathTests
         // Exactly on the first boundary line, and on the second, halfway between inner and outer edge.
         Assert.False(geometry.FillContains(OnBoundary(slot, Metrics48.IconRingRadius)));
         Assert.False(geometry.FillContains(OnBoundary(slot + 1, Metrics48.IconRingRadius)));
+    }
+
+    /// <summary>
+    /// A point at the given distance from the center, lying on the line at 22.5° (the boundary between slots 0 and 1).
+    /// <paramref name="side"/> is the sideways offset from that line; positive is into slot 1, negative into slot 0.
+    /// </summary>
+    private static System.Windows.Point SharedBoundaryPoint(double radius, double side)
+    {
+        double t = Math.Sqrt(radius * radius - side * side);
+        double radians = 22.5 * Math.PI / 180.0;
+        double sin = Math.Sin(radians);
+        double cos = Math.Cos(radians);
+        return new System.Windows.Point(
+            Center.X + t * sin + side * cos,
+            Center.Y - t * cos + side * sin);
+    }
+
+    [Fact]
+    public void CreateSliceGeometry_GapBetweenSlots0And1_IsHalfGapWideOnEachSide()
+    {
+        var slice0 = WheelMath.CreateSliceGeometry(0, Metrics48);
+        var slice1 = WheelMath.CreateSliceGeometry(1, Metrics48);
+        double halfGap = Metrics48.GapWidth / 2;
+
+        // Radii are kept 5 DIPs inside the inner and outer edges, so the test does not sit on the arcs.
+        double[] radii = { Metrics48.InnerRadius + 5, Metrics48.IconRingRadius, Metrics48.OuterRadius - 5 };
+        foreach (double radius in radii)
+        {
+            // Within 0.4 DIPs of the gap edge on either side: inside neither slice.
+            foreach (double side in new[] { -(halfGap - 0.4), halfGap - 0.4 })
+            {
+                var p = SharedBoundaryPoint(radius, side);
+                Assert.False(slice0.FillContains(p), $"radius {radius}, side {side}: inside slot 0");
+                Assert.False(slice1.FillContains(p), $"radius {radius}, side {side}: inside slot 1");
+            }
+
+            // 0.6 DIPs past the gap edge: inside the slice on that side.
+            var into0 = SharedBoundaryPoint(radius, -(halfGap + 0.6));
+            Assert.True(slice0.FillContains(into0), $"radius {radius}: slot 0 should contain its side");
+            Assert.False(slice1.FillContains(into0), $"radius {radius}: slot 1 should not contain slot 0's side");
+
+            var into1 = SharedBoundaryPoint(radius, halfGap + 0.6);
+            Assert.True(slice1.FillContains(into1), $"radius {radius}: slot 1 should contain its side");
+            Assert.False(slice0.FillContains(into1), $"radius {radius}: slot 0 should not contain slot 1's side");
+        }
     }
 
     [Fact]

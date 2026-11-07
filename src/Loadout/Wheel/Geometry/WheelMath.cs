@@ -109,6 +109,11 @@ public static class WheelMath
             throw new ArgumentOutOfRangeException(nameof(maxLength), maxLength, "Maximum length must not be negative.");
         }
 
+        if (!double.IsFinite(dx) || !double.IsFinite(dy))
+        {
+            return (0, 0);
+        }
+
         double length = Math.Sqrt(dx * dx + dy * dy);
         if (length == 0 || length <= maxLength)
         {
