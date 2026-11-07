@@ -6,7 +6,8 @@ namespace Loadout.Contracts;
 
 /// <summary>
 /// Loads, holds and saves settings.json (SPEC section 10).
-/// All members are called on the UI thread.
+/// All members are called on the UI thread. Read and write the file only with
+/// <see cref="SettingsJson.Options"/> (or <see cref="SettingsJson.Serialize"/> and <see cref="SettingsJson.Deserialize"/>).
 /// </summary>
 public interface ISettingsStore
 {
@@ -23,15 +24,20 @@ public interface ISettingsStore
     void Load();
 
     /// <summary>
-    /// Writes <see cref="Current"/> to disk atomically (write a temp file, then replace),
-    /// then raises <see cref="Changed"/>. Call after changing anything in <see cref="Current"/>.
+    /// Call after changing anything in <see cref="Current"/>. Raises <see cref="Changed"/> immediately,
+    /// but writes to disk at most once per 400 ms (debounced, using a one-shot dispatcher timer, not polling),
+    /// so dragging a slider doesn't write the file constantly.
+    /// Writes are atomic: write a temp file in the same folder, then replace.
     /// </summary>
     void Save();
+
+    /// <summary>Writes any pending debounced change to disk now. Called on exit. Never throws.</summary>
+    void Flush();
 
     /// <summary>Replaces all settings (used by reset and import), saves, and raises <see cref="Changed"/>.</summary>
     void Replace(LoadoutSettings settings);
 
-    /// <summary>Writes the current settings to <paramref name="filePath"/>.</summary>
+    /// <summary>Writes the current settings to <paramref name="filePath"/> immediately.</summary>
     void Export(string filePath);
 
     /// <summary>
@@ -40,6 +46,9 @@ public interface ISettingsStore
     /// </summary>
     bool Import(string filePath);
 
-    /// <summary>Raised after settings were saved or replaced.</summary>
+    /// <summary>
+    /// Raised after <see cref="Save"/> or <see cref="Replace"/>. Listeners must be cheap, or check
+    /// what actually changed before doing expensive work (for example, the host only re-warms icons when slots or icon size changed).
+    /// </summary>
     event EventHandler? Changed;
 }

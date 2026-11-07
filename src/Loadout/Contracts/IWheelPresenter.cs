@@ -8,6 +8,12 @@ namespace Loadout.Contracts;
 /// Shows the wheel and tracks which slot is highlighted (SPEC sections 2 and 4).
 /// Reads groups and appearance from <see cref="ISettingsStore"/> and icons from <see cref="IIconProvider"/>.
 /// All members are called on the UI thread and must be fast.
+/// Wheel windows must never appear in the taskbar or Alt + Tab, and must never take focus from the app in front.
+/// <para>
+/// The presenter owns the "remembered" state: it updates <see cref="LoadoutSettings.LastGroupIndex"/> when the group
+/// changes and <see cref="GroupSettings.LastLaunchedSlot"/> when a slot is launched, then calls
+/// <see cref="ISettingsStore.Save"/> (which is debounced, so this is cheap).
+/// </para>
 /// </summary>
 public interface IWheelPresenter
 {
@@ -16,7 +22,11 @@ public interface IWheelPresenter
     /// <summary>Shows the wheel centered on <paramref name="cursor"/> (nudged to stay on screen), on the last used group.</summary>
     void Open(ScreenPoint cursor);
 
-    /// <summary>Updates the highlight from the total mouse movement since opening.</summary>
+    /// <summary>
+    /// Updates the highlight from the total mouse movement since opening (physical pixels).
+    /// The presenter keeps its own aim vector from the change between calls, clamped with
+    /// WheelMath.ClampAim, so turning after a long movement doesn't need a long way back.
+    /// </summary>
     void UpdateAim(double dx, double dy);
 
     /// <summary>+1 = next group, -1 = previous group, wrapping around.</summary>

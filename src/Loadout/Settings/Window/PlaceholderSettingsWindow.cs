@@ -35,6 +35,7 @@ public sealed class PlaceholderSettingsWindow : ISettingsWindow
                 HorizontalAlignment = HorizontalAlignment.Center,
             },
         };
+        WindowStyles.HideFromTaskSwitchers(_window);
         _window.Closed += (_, _) =>
         {
             _window = null;

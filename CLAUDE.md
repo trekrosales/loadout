@@ -40,7 +40,9 @@ If `dotnet` isn't on PATH, use `"C:\Program Files\dotnet\dotnet.exe"`.
 7. **Threading:** contracts are called on the UI thread. Never block it. Low-level hook callbacks must return in well under 1 ms.
 8. **Light and idle:** no timers or polling loops while idle. Freeze WPF brushes, geometries and images you create.
 9. **Tests:** put them in `tests/Loadout.Tests/<Area>/` (for example `tests/Loadout.Tests/Settings/`). Tests must not touch the real user folders; set `LOADOUT_DATA_DIR`.
-10. **Never** write to the registry `Run` key, the real `%AppData%\Loadout`, or anything outside the repo and temp folders.
+10. **Never** write to the registry `Run` key, the real `%AppData%\Loadout`, or anything outside the repo and temp folders. The startup-registration code (`src/Loadout/Startup/`) may contain code that writes the Run key, but its tests must use a throwaway key such as `HKCU\Software\Loadout-Tests\Run`.
+11. **Keep windows out of the taskbar and Alt+Tab.** Use `Core.WindowStyles.HideFromTaskSwitchers`, or `Core.WindowStyles.MakeOverlay` for the wheel.
+12. **Serialize settings only with `SettingsJson.Options`.**
 
 ## Git
 

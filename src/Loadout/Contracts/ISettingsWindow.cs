@@ -7,8 +7,8 @@ public interface ISettingsWindow
 {
     /// <summary>
     /// Shows the window, or brings it to the front if already open.
-    /// The window is created on demand and fully released when closed (SPEC section 8).
-    /// It must never appear in the taskbar.
+    /// The window is created on demand and fully released when closed, then calls Core.MemoryTrimmer.Trim (SPEC section 8).
+    /// It must never appear in the taskbar or Alt + Tab: call Core.WindowStyles.HideFromTaskSwitchers on it.
     /// </summary>
     void Show();
 }

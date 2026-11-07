@@ -1,6 +1,11 @@
 // CONTRACT (owned by the lead): signatures and documented behavior.
 // IMPLEMENTATION: Wave 1, branch feature/wheel-math. Pure functions only, no state, no I/O.
 // Units are WPF device-independent pixels (DIPs) unless stated otherwise. Positive Y is down.
+// "Aim" values (SlotFromAim, ClampAim, CancelZoneRadius) are in physical pixels of mouse movement, a separate
+// unit from drawing; CancelZoneRadius is simply a number derived from the icon size.
+// Invalid arguments: throw ArgumentOutOfRangeException for a slot index outside 0-7, count < 1, or an icon size
+// that is not a finite number > 0; a negative maxLength or radius also throws. SlotFromAim returns null (Cancel)
+// if dx or dy is NaN or infinite.
 // Note: this namespace is called "Geometry", so the WPF type is written as System.Windows.Media.Geometry.
 
 namespace Loadout.Wheel.Geometry;

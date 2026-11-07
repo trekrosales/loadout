@@ -31,32 +31,49 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             Log.Error("Unhandled error.", args.ExceptionObject as Exception);
 
-        _instance = SingleInstance.TryAcquire();
-        if (_instance is null)
+        try
         {
-            // Another copy is already running; it has been asked to open settings.
-            Shutdown();
-            return;
+            _instance = SingleInstance.TryAcquire();
+            if (_instance is null)
+            {
+                // Another copy is already running; it has been asked to open settings.
+                Shutdown();
+                return;
+            }
+
+            var settings = new InMemorySettingsStore();
+            var icons = new PlaceholderIconProvider();
+            var input = new PlaceholderInputService();
+            _host = new AppHost(
+                settings,
+                input,
+                new PlaceholderWheelPresenter(),
+                new PlaceholderLauncher(),
+                icons,
+                new PlaceholderGameModePolicy(),
+                new PlaceholderSettingsWindow(),
+                new TrayIcon());
+            _host.ExitRequested += (_, _) => Shutdown();
+            _host.Start();
+
+            _instance.ListenForOtherInstances(() => AppHost.RunOnUiThread(() => _host?.ShowSettings()));
+
+            // Start-up allocates a lot that is never needed again; give it back once idle.
+            Dispatcher.BeginInvoke(MemoryTrimmer.Trim, DispatcherPriority.ApplicationIdle);
         }
-
-        var settings = new InMemorySettingsStore();
-        var icons = new PlaceholderIconProvider();
-        _host = new AppHost(
-            settings,
-            new PlaceholderInputService(),
-            new PlaceholderWheelPresenter(),
-            new PlaceholderLauncher(),
-            icons,
-            new PlaceholderGameModePolicy(),
-            new PlaceholderSettingsWindow(),
-            new TrayIcon());
-        _host.ExitRequested += (_, _) => Shutdown();
-        _host.Start();
-
-        _instance.ListenForOtherInstances(() => AppHost.RunOnUiThread(() => _host?.ShowSettings()));
-
-        // Start-up allocates a lot that is never needed again; give it back once idle.
-        Dispatcher.BeginInvoke(MemoryTrimmer.Trim, DispatcherPriority.ApplicationIdle);
+        catch (Exception ex)
+        {
+            // Never leave a half-started, invisible app holding the single-instance lock.
+            Log.Error("Loadout could not start.", ex);
+            MessageBox.Show(
+                "Loadout couldn't start. Details were saved to:\n" + AppPaths.LogFile,
+                "Loadout",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            _host?.Dispose();
+            _host = null;
+            Shutdown(1);
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)

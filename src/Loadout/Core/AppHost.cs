@@ -1,5 +1,8 @@
+using System.Text;
 using System.Windows;
+using System.Windows.Threading;
 using Loadout.Contracts;
+using Loadout.Settings.Model;
 using Loadout.Tray;
 
 namespace Loadout.Core;
@@ -18,6 +21,8 @@ public sealed class AppHost : IDisposable
     private readonly IGameModePolicy _gameMode;
     private readonly ISettingsWindow _settingsWindow;
     private readonly TrayIcon _tray;
+    private string? _warmedIconsSignature;
+    private bool _disposed;
 
     public AppHost(
         ISettingsStore settings,
@@ -61,7 +66,7 @@ public sealed class AppHost : IDisposable
         _input.Configure(_settings.Current.Hotkey);
         _input.Start();
 
-        WarmIcons();
+        WarmIconsIfNeeded();
         ShowWelcomeOnce();
     }
 
@@ -70,8 +75,15 @@ public sealed class AppHost : IDisposable
 
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
         _settings.Changed -= OnSettingsChanged;
         _input.Dispose();
+        _settings.Flush();
         _tray.Dispose();
     }
 
@@ -95,24 +107,49 @@ public sealed class AppHost : IDisposable
             return;
         }
 
-        var result = _launcher.Launch(slot);
-        if (result.Outcome == LaunchOutcome.Failed)
+        // Launch on a later dispatcher turn so the wheel's close is processed first
+        // and nothing slow ever runs while input is being handled.
+        Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
         {
-            Log.Error($"Could not open {slot.Type} slot: {result.Message}");
-        }
+            var result = _launcher.Launch(slot);
+            if (result.Outcome == LaunchOutcome.Failed)
+            {
+                Log.Error($"Could not open {slot.Type} slot: {result.Message}");
+            }
+        });
     }
 
     private void OnSettingsChanged(object? sender, EventArgs e)
     {
         _input.Configure(_settings.Current.Hotkey);
-        WarmIcons();
+        WarmIconsIfNeeded();
     }
 
-    private void WarmIcons()
+    /// <summary>Re-warms icons only when the slots or the icon size changed, not on every save.</summary>
+    private void WarmIconsIfNeeded()
     {
         var current = _settings.Current;
-        var slots = current.Groups.SelectMany(g => g.Slots).OfType<Settings.Model.SlotSettings>();
+        var signature = IconSignature(current);
+        if (signature == _warmedIconsSignature)
+        {
+            return;
+        }
+
+        _warmedIconsSignature = signature;
+        var slots = current.Groups.SelectMany(g => g.Slots).OfType<SlotSettings>().ToList();
         _icons.Warm(slots, current.Appearance.IconSize);
+    }
+
+    private static string IconSignature(LoadoutSettings settings)
+    {
+        var sb = new StringBuilder().Append(settings.Appearance.IconSize).Append('|');
+        foreach (var slot in settings.Groups.SelectMany(g => g.Slots))
+        {
+            sb.Append(slot?.Type).Append(':').Append(slot?.Path).Append(':')
+              .Append(slot?.Url).Append(':').Append(slot?.IconPath).Append('|');
+        }
+
+        return sb.ToString();
     }
 
     private void ShowWelcomeOnce()
@@ -123,9 +160,11 @@ public sealed class AppHost : IDisposable
             return;
         }
 
-        _tray.ShowNotification("Loadout is running", "Hold Ctrl + Alt to open your wheel.");
-        general.HasShownWelcome = true;
-        _settings.Save();
+        if (_tray.ShowNotification("Loadout is running", "Hold Ctrl + Alt to open your wheel."))
+        {
+            general.HasShownWelcome = true;
+            _settings.Save();
+        }
     }
 
     internal static void RunOnUiThread(Action action) =>

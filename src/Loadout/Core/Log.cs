@@ -4,13 +4,13 @@ using System.Text;
 namespace Loadout.Core;
 
 /// <summary>
-/// Tiny local error log (SPEC section 10): errors only, at most about 1 MB, never sent anywhere.
-/// When the file passes the limit it is renamed to loadout.old.log, replacing any older one.
-/// Never throws.
+/// Tiny local error log (SPEC section 10): errors only, never sent anywhere.
+/// When the file passes 512 KB it is renamed to loadout.old.log (replacing any older one),
+/// so the two files together stay under 1 MB. Never throws.
 /// </summary>
 public static class Log
 {
-    public const long MaxBytes = 1024 * 1024;
+    public const long MaxBytes = 512 * 1024;
 
     private static readonly Lock s_gate = new();
 

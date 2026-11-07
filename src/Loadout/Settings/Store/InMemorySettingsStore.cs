@@ -16,6 +16,10 @@ public sealed class InMemorySettingsStore : ISettingsStore
 
     public void Save() => Changed?.Invoke(this, EventArgs.Empty);
 
+    public void Flush()
+    {
+    }
+
     public void Replace(LoadoutSettings settings)
     {
         Current = settings;

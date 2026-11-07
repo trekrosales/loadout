@@ -24,11 +24,20 @@ public sealed class PlaceholderInputService : IInputService
     {
     }
 
+    public IDisposable Suspend() => new NoOp();
+
     public void Configure(HotkeySettings hotkey)
     {
     }
 
     public void Dispose()
     {
+    }
+
+    private sealed class NoOp : IDisposable
+    {
+        public void Dispose()
+        {
+        }
     }
 }

@@ -1,5 +1,5 @@
 # Starts Loadout with a throwaway data folder, waits, and reports idle CPU and memory
-# against the SPEC section 8 targets. Stops the app afterwards.
+# against the SPEC section 8 targets. Stops only the copy it started.
 # Usage (repo root):  powershell -NoProfile -File tools/measure.ps1 [-Exe path\to\Loadout.exe] [-Seconds 10]
 
 param(
@@ -11,7 +11,6 @@ $ErrorActionPreference = 'Stop'
 $data = Join-Path ([IO.Path]::GetTempPath()) ('loadout-measure-' + [Guid]::NewGuid().ToString('N'))
 $env:LOADOUT_DATA_DIR = $data
 
-Get-Process Loadout -ErrorAction SilentlyContinue | Stop-Process -Force
 $p = Start-Process (Resolve-Path $Exe).Path -PassThru
 try {
     Start-Sleep -Seconds 6
@@ -20,7 +19,10 @@ try {
     Start-Sleep -Seconds $Seconds
     $p.Refresh()
     $cpuMs = $p.TotalProcessorTime.TotalMilliseconds - $cpuStart
-    $private = (Get-Counter "\Process(Loadout)\Working Set - Private").CounterSamples[0].CookedValue / 1MB
+
+    # Private working set ("Memory" in Task Manager). CIM class names don't depend on the Windows language.
+    $perf = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -Filter "IDProcess = $($p.Id)"
+    $private = [double]$perf.WorkingSetPrivate / 1MB
 
     $cpuOk = $cpuMs -le 20
     $memOk = $private -le 50

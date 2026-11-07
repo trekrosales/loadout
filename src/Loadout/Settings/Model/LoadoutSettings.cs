@@ -1,5 +1,8 @@
 // CONTRACT (owned by the lead). The shape of settings.json, see SPEC section 10.
 // Agents may read these types but must not change them without the lead.
+// Serialize only with SettingsJson.Options so the file matches SPEC section 10.
+
+using System.Text.Json.Serialization;
 
 namespace Loadout.Settings.Model;
 
@@ -127,7 +130,12 @@ public sealed class SlotSettings
 {
     public SlotType Type { get; set; }
 
-    /// <summary>For App: path to an .exe or .lnk. For Folder: the folder path. Unused for Website.</summary>
+    /// <summary>
+    /// For App: path to an .exe or .lnk, or a shell path for apps without a file, such as Store apps:
+    /// "shell:AppsFolder\&lt;AppUserModelID&gt;".
+    /// For Folder: the folder path, or a shell folder such as "shell:Downloads".
+    /// Unused for Website. The settings window, launcher and icon provider must all accept both forms.
+    /// </summary>
     public string? Path { get; set; }
 
     /// <summary>For Website: the full URL (http or https). Unused otherwise.</summary>
@@ -139,6 +147,7 @@ public sealed class SlotSettings
     /// <summary>Optional custom label. null = derive from the app, folder or site name.</summary>
     public string? Label { get; set; }
 
-    /// <summary>Optional path to a custom PNG, JPG or ICO image. null = automatic icon.</summary>
+    /// <summary>Optional path to a custom PNG, JPG or ICO image. null = automatic icon. Stored as "icon" in settings.json.</summary>
+    [JsonPropertyName("icon")]
     public string? IconPath { get; set; }
 }

@@ -1,4 +1,4 @@
-// PLACEHOLDER: returns a plain grey circle. Wave 2 (feature/icons) replaces it.
+﻿// PLACEHOLDER: returns a plain grey circle. Wave 2 (feature/icons) replaces it.
 
 using System.Windows;
 using System.Windows.Media;
@@ -11,9 +11,9 @@ public sealed class PlaceholderIconProvider : IIconProvider
 {
     private static readonly ImageSource s_icon = CreateIcon();
 
-    public ImageSource GetIcon(SlotSettings slot, int pixelSize) => s_icon;
+    public ImageSource GetIcon(SlotSettings slot, int iconSize) => s_icon;
 
-    public void Warm(IEnumerable<SlotSettings> slots, int pixelSize)
+    public void Warm(IEnumerable<SlotSettings> slots, int iconSize)
     {
     }
 

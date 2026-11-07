@@ -17,8 +17,9 @@ public sealed class OpenRequestedEventArgs(ScreenPoint cursor) : EventArgs
     public bool Cancel { get; set; }
 
     /// <summary>
-    /// Set to true to stop mouse movement, clicks and scrolling from reaching other apps while the wheel is open.
-    /// The cursor then stays where the wheel opened. Defaults to true.
+    /// Whether mouse <em>movement</em> is kept from reaching other apps while the wheel is open; the cursor then stays
+    /// where the wheel opened. Defaults to true. False is only used in games when "block mouse in game" is off (SPEC 7).
+    /// Clicks and scrolling are <em>always</em> kept from other apps while the wheel is open (SPEC 2.2, 2.3), whatever this says.
     /// </summary>
     public bool BlockMouse { get; set; } = true;
 }
@@ -26,25 +27,42 @@ public sealed class OpenRequestedEventArgs(ScreenPoint cursor) : EventArgs
 /// <summary>How far the mouse has moved since the wheel opened, in physical pixels. Positive Y is down.</summary>
 public sealed class AimChangedEventArgs(double dx, double dy) : EventArgs
 {
+    /// <summary>Total horizontal movement since opening (not since the previous event).</summary>
     public double Dx { get; } = dx;
+
+    /// <summary>Total vertical movement since opening (not since the previous event).</summary>
     public double Dy { get; } = dy;
 }
 
 /// <summary>
 /// Watches the keyboard and mouse with low-level hooks (SPEC section 2).
-/// Must be created and used on the UI thread; all events are raised on the UI thread.
-/// Hook callbacks must return quickly, so event handlers must be fast.
+/// Must be created and used on the UI thread.
+/// <para>
+/// Threading rule: hook callbacks only record state and decide whether to swallow the input. They never run
+/// event handlers. Events are raised on the UI thread <em>after</em> the hook callback has returned
+/// (posted with Dispatcher.BeginInvoke, or raised from a dispatcher timer), so handlers may take a little time
+/// without lagging the keyboard. The one synchronous answer, <see cref="OpenRequestedEventArgs.Cancel"/> and
+/// <see cref="OpenRequestedEventArgs.BlockMouse"/>, is read when <see cref="OpenRequested"/> returns, which happens
+/// when the hold-delay timer fires, not inside a hook.
+/// </para>
 /// </summary>
 public interface IInputService : IDisposable
 {
     /// <summary>Installs the hooks. Idempotent.</summary>
     void Start();
 
-    /// <summary>Applies a new hotkey. Safe to call at any time.</summary>
+    /// <summary>Applies a new hotkey. Safe to call at any time; cheap if nothing changed.</summary>
     void Configure(HotkeySettings hotkey);
 
-    /// <summary>When true, the hotkey does nothing (tray menu "Pause").</summary>
+    /// <summary>When true, the hotkey does nothing (tray menu "Pause"). Owned by the tray menu only.</summary>
     bool IsPaused { get; set; }
+
+    /// <summary>
+    /// Temporarily makes the hotkey do nothing and swallows nothing, without touching <see cref="IsPaused"/>.
+    /// Used by the settings window while recording a new hotkey. Suspensions nest: input resumes when every
+    /// returned handle is disposed. If the wheel is open, it is cancelled first.
+    /// </summary>
+    IDisposable Suspend();
 
     /// <summary>True between a successful <see cref="OpenRequested"/> and <see cref="Released"/> or <see cref="Cancelled"/>.</summary>
     bool IsWheelOpen { get; }
