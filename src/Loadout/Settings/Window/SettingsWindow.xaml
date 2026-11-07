@@ -1,0 +1,57 @@
+<Window x:Class="Loadout.Settings.Window.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="Loadout settings"
+        Width="980" Height="680" MinWidth="860" MinHeight="600"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None" ResizeMode="CanResize" ShowInTaskbar="False"
+        Background="#1E1F22"
+        FontFamily="Segoe UI Variable Text, Segoe UI" Foreground="White"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Ideal">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Theme.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="44" ResizeBorderThickness="6" GlassFrameThickness="0"
+                            CornerRadius="0" UseAeroCaptionButtons="False"/>
+    </shell:WindowChrome.WindowChrome>
+
+    <Border x:Name="Root" Background="{StaticResource BgBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="44"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="184"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition x:Name="PreviewColumn" Width="276"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Title bar -->
+            <Grid Grid.ColumnSpan="3" Background="#FF1A1B1E">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="18,0,0,0">
+                    <Border Width="10" Height="10" CornerRadius="5" Background="{StaticResource AccentBrush}" Margin="0,0,10,0"/>
+                    <TextBlock Text="Loadout" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource DimTextBrush}"/>
+                </StackPanel>
+                <Button x:Name="CloseButton" Content="&#x2715;" Width="46" Height="44" Padding="0" HorizontalAlignment="Right"
+                        Style="{StaticResource GhostButton}" shell:WindowChrome.IsHitTestVisibleInChrome="True"
+                        ToolTip="Close"/>
+            </Grid>
+
+            <!-- Navigation -->
+            <StackPanel x:Name="Nav" Grid.Row="1" Margin="12,16,12,12"/>
+
+            <!-- Page -->
+            <ContentControl x:Name="PageHost" Grid.Row="1" Grid.Column="1" IsTabStop="False"/>
+
+            <!-- Preview -->
+            <Border x:Name="PreviewHost" Grid.Row="1" Grid.Column="2" Margin="0,22,20,20"/>
+        </Grid>
+    </Border>
+</Window>
