@@ -47,17 +47,7 @@ internal sealed class HotkeyPage : SectionPage
         };
         _recorder.Unloaded += (_, _) => StopRecording(cancelled: true);
 
-        _recordButton = UiKit.MakeButton("Record new hotkey", (_, _) =>
-        {
-            if (_suspension is null)
-            {
-                StartRecording();
-            }
-            else
-            {
-                StopRecording(cancelled: true);
-            }
-        }, "AccentButton");
+        _recordButton = UiKit.MakeButton("Record new hotkey", (_, _) => ToggleRecording(), "AccentButton");
         _recordButton.Focusable = false;
         var reset = UiKit.MakeButton("Reset to Ctrl + Alt", (_, _) => ResetHotkey());
         reset.Margin = new Thickness(8, 0, 0, 0);
@@ -166,7 +156,20 @@ internal sealed class HotkeyPage : SectionPage
         _hint.Margin = new Thickness(0, 10, 0, 0);
     }
 
-    private void StartRecording()
+    /// <summary>What the Record / Cancel button does.</summary>
+    internal void ToggleRecording()
+    {
+        if (_suspension is null)
+        {
+            StartRecording();
+        }
+        else
+        {
+            StopRecording(cancelled: true);
+        }
+    }
+
+    internal void StartRecording()
     {
         _keys.Clear();
         _mouse.Clear();
@@ -211,6 +214,17 @@ internal sealed class HotkeyPage : SectionPage
             _ => e.Key,
         };
 
+        Press(key);
+    }
+
+    /// <summary>A key went down while recording.</summary>
+    internal void Press(Key key)
+    {
+        if (_suspension is null)
+        {
+            return;
+        }
+
         if (key == Key.Escape)
         {
             StopRecording(cancelled: true);
@@ -236,7 +250,17 @@ internal sealed class HotkeyPage : SectionPage
         }
 
         e.Handled = true;
-        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        Release(e.Key == Key.System ? e.SystemKey : e.Key);
+    }
+
+    /// <summary>A key came up while recording.</summary>
+    internal void Release(Key key)
+    {
+        if (_suspension is null)
+        {
+            return;
+        }
+
         _down.Remove(key);
 
         // Alt and Ctrl are reported by side; clear both sides if the matching token is released.

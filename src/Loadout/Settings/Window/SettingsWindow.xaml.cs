@@ -61,13 +61,27 @@ public sealed partial class SettingsWindow : System.Windows.Window
         KeyDown += (_, e) =>
         {
             if (e.Key == System.Windows.Input.Key.Escape && System.Windows.Input.Keyboard.FocusedElement is not TextBox
-                && !_ctx.Input.IsWheelOpen && _current != (int)SettingsSection.Hotkey)
+                && !_ctx.Input.IsWheelOpen && !((HotkeyPage)_pages[(int)SettingsSection.Hotkey]).IsRecording)
             {
                 Close();
             }
         };
 
         SelectSection(SettingsSection.Shortcuts);
+        FitToWorkArea();
+    }
+
+    /// <summary>On high-DPI or small screens the default size can be bigger than the monitor: keep the window on it.</summary>
+    private void FitToWorkArea()
+    {
+        var area = SystemParameters.WorkArea;
+        Width = Math.Min(Width, area.Width);
+        Height = Math.Min(Height, area.Height);
+        MinWidth = Math.Min(MinWidth, area.Width);
+        MinHeight = Math.Min(MinHeight, area.Height);
+        Left = area.Left + Math.Max(0, (area.Width - Width) / 2);
+        Top = area.Top + Math.Max(0, (area.Height - Height) / 2);
+        WindowStartupLocation = WindowStartupLocation.Manual;
     }
 
     /// <summary>Switches to a section (also used for screenshots).</summary>
@@ -108,6 +122,11 @@ public sealed partial class SettingsWindow : System.Windows.Window
 
     protected override void OnClosed(EventArgs e)
     {
+        foreach (var page in _pages)
+        {
+            page.OnWindowClosing();
+        }
+
         _ctx.PreviewChanged -= _preview.Refresh;
         _ctx.Reloaded -= ReloadPages;
         _ctx.Owner = null;

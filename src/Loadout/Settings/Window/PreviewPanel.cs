@@ -14,8 +14,7 @@ internal sealed class PreviewPanel : Border
 
     private readonly SettingsContext _ctx;
     private readonly Viewbox _box = new();
-    private WheelVisual _wheel = new();
-    private string? _signature;
+    private readonly WheelVisual _wheel = new();
     private readonly Rectangle _dim = new();
 
     public PreviewPanel(SettingsContext ctx)
@@ -53,16 +52,6 @@ internal sealed class PreviewPanel : Border
         var groupIndex = _ctx.ClampedGroup();
         var group = settings.Groups[groupIndex];
 
-        // WheelVisual.Configure can't rebuild itself a second time (its text blocks stay attached to the old layout),
-        // so a new visual is used whenever size or colors change.
-        var signature = string.Join('|', appearance.IconSize, appearance.TintColor, appearance.TintOpacity, appearance.HighlightColor);
-        if (_signature is not null && signature != _signature)
-        {
-            _wheel = new WheelVisual();
-            _box.Child = _wheel;
-        }
-
-        _signature = signature;
         _wheel.Configure(appearance);
         _wheel.ShowGroup(
             group,

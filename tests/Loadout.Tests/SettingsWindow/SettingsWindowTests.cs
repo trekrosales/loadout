@@ -27,6 +27,9 @@ public class SettingsWindowTests
 
         public int Suspended { get; private set; }
 
+        /// <summary>Suspensions handed out and not yet disposed.</summary>
+        public int Active { get; private set; }
+
         public bool IsPaused { get => _inner.IsPaused; set => _inner.IsPaused = value; }
 
         public bool IsWheelOpen => false;
@@ -51,10 +54,25 @@ public class SettingsWindowTests
         public IDisposable Suspend()
         {
             Suspended++;
-            return _inner.Suspend();
+            Active++;
+            return new Handle(this);
         }
 
         public void Dispose() => _inner.Dispose();
+
+        private sealed class Handle(CountingInput owner) : IDisposable
+        {
+            private bool _disposed;
+
+            public void Dispose()
+            {
+                if (!_disposed)
+                {
+                    _disposed = true;
+                    owner.Active--;
+                }
+            }
+        }
     }
 
     private static void RunSta(Action action)
@@ -149,6 +167,129 @@ public class SettingsWindowTests
             ctx.Current.Appearance.IconSize = 64;
             ctx.Commit();
             Assert.True(saves >= 1);
+            window.Close();
+        });
+    }
+
+    private static (SettingsContext Ctx, CountingInput Input, InMemorySettingsStore Store) NewContext()
+    {
+        var store = new InMemorySettingsStore();
+        store.Replace(Sample());
+        var input = new CountingInput();
+        return (new SettingsContext(store, input, new PlaceholderIconProvider(), new FakeStartup()), input, store);
+    }
+
+    [Fact]
+    public void Recording_resumes_input_after_a_successful_recording()
+    {
+        using var sandbox = new TestSandbox();
+        RunSta(() =>
+        {
+            var (ctx, input, store) = NewContext();
+            var page = new HotkeyPage(ctx);
+            page.StartRecording();
+            Assert.Equal(1, input.Active);
+            Assert.True(page.IsRecording);
+
+            page.Press(System.Windows.Input.Key.LeftCtrl);
+            page.Press(System.Windows.Input.Key.K);
+            Assert.Equal(1, input.Active);
+            page.Release(System.Windows.Input.Key.K);
+            page.Release(System.Windows.Input.Key.LeftCtrl);
+
+            Assert.Equal(0, input.Active);
+            Assert.False(page.IsRecording);
+            Assert.Equal(["Ctrl", "K"], store.Current.Hotkey.Keys);
+        });
+    }
+
+    [Fact]
+    public void Recording_resumes_input_after_the_cancel_button()
+    {
+        using var sandbox = new TestSandbox();
+        RunSta(() =>
+        {
+            var (ctx, input, store) = NewContext();
+            var page = new HotkeyPage(ctx);
+            page.ToggleRecording();
+            Assert.Equal(1, input.Active);
+            page.ToggleRecording();
+            Assert.Equal(0, input.Active);
+            Assert.False(page.IsRecording);
+            Assert.Equal(["Ctrl", "Alt"], store.Current.Hotkey.Keys);
+            Assert.Equal(1, input.Suspended);
+        });
+    }
+
+    [Fact]
+    public void Recording_resumes_input_after_escape()
+    {
+        using var sandbox = new TestSandbox();
+        RunSta(() =>
+        {
+            var (ctx, input, store) = NewContext();
+            var page = new HotkeyPage(ctx);
+            page.StartRecording();
+            page.Press(System.Windows.Input.Key.LeftAlt);
+            page.Press(System.Windows.Input.Key.Escape);
+            Assert.Equal(0, input.Active);
+            Assert.Equal(["Ctrl", "Alt"], store.Current.Hotkey.Keys);
+        });
+    }
+
+    [Fact]
+    public void An_invalid_recording_is_refused_but_still_resumes_input()
+    {
+        using var sandbox = new TestSandbox();
+        RunSta(() =>
+        {
+            var (ctx, input, store) = NewContext();
+            var page = new HotkeyPage(ctx);
+            page.StartRecording();
+            page.Press(System.Windows.Input.Key.Q);
+            page.Press(System.Windows.Input.Key.W);
+            page.Release(System.Windows.Input.Key.Q);
+            page.Release(System.Windows.Input.Key.W);
+            Assert.Equal(0, input.Active);
+            Assert.Equal(["Ctrl", "Alt"], store.Current.Hotkey.Keys);
+        });
+    }
+
+    [Fact]
+    public void Closing_the_window_mid_recording_resumes_input()
+    {
+        using var sandbox = new TestSandbox();
+        RunSta(() =>
+        {
+            var (ctx, input, _) = NewContext();
+            var window = new Loadout.Settings.Window.SettingsWindow(ctx);
+            window.Show();
+            window.SelectSection(SettingsSection.Hotkey);
+            var pages = (SectionPage[])typeof(Loadout.Settings.Window.SettingsWindow)
+                .GetField("_pages", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(window)!;
+            ((HotkeyPage)pages[(int)SettingsSection.Hotkey]).StartRecording();
+            Assert.Equal(1, input.Active);
+            window.Close();
+            Assert.Equal(0, input.Active);
+        });
+    }
+
+    [Fact]
+    public void Group_tabs_wrap_so_every_group_is_reachable()
+    {
+        using var sandbox = new TestSandbox();
+        RunSta(() =>
+        {
+            var (ctx, _, store) = NewContext();
+            for (var i = 0; i < 12; i++)
+            {
+                store.Current.Groups.Add(GroupSettings.CreateEmpty("Group " + (i + 10)));
+            }
+
+            var window = new Loadout.Settings.Window.SettingsWindow(ctx);
+            window.Show();
+            window.UpdateLayout();
             window.Close();
         });
     }

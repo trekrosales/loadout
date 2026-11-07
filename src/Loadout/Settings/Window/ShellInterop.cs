@@ -99,14 +99,20 @@ internal static unsafe partial class ShellInterop
             }
 
             var count = BitConverter.ToUInt32(bytes, 0);
-            if (count < 1 || bytes.Length < 4 + ((count + 1) * 4))
+            if (count < 1 || count > 4096)
+            {
+                return null;
+            }
+
+            var headerSize = 4L + ((count + 1L) * 4L);
+            if (bytes.Length < headerSize)
             {
                 return null;
             }
 
             var parentOffset = BitConverter.ToUInt32(bytes, 4);
             var childOffset = BitConverter.ToUInt32(bytes, 8);
-            if (parentOffset >= bytes.Length || childOffset >= bytes.Length)
+            if (!IsValidIdList(bytes, parentOffset, headerSize) || !IsValidIdList(bytes, childOffset, headerSize))
             {
                 return null;
             }
@@ -149,6 +155,40 @@ internal static unsafe partial class ShellInterop
         {
             Log.Error("Could not read the dropped Start menu item.", ex);
             return null;
+        }
+    }
+
+    /// <summary>
+    /// True if a complete item ID list (a chain of size-prefixed pieces ending in a zero size) starts at
+    /// <paramref name="offset"/> and ends inside the buffer.
+    /// </summary>
+    internal static bool IsValidIdList(byte[] bytes, long offset, long minOffset)
+    {
+        if (offset < minOffset || offset > bytes.Length - 2L)
+        {
+            return false;
+        }
+
+        var position = offset;
+        while (true)
+        {
+            if (position > bytes.Length - 2L)
+            {
+                return false;
+            }
+
+            var size = BitConverter.ToUInt16(bytes, (int)position);
+            if (size == 0)
+            {
+                return true;
+            }
+
+            if (size < 2)
+            {
+                return false;
+            }
+
+            position += size;
         }
     }
 

@@ -211,3 +211,45 @@ public class HotkeyRecordingTests
         Assert.Equal("Ctrl", HotkeyRecording.DisplayName("Ctrl"));
     }
 }
+
+public class ShellIdListTests
+{
+    private static byte[] Chain(params ushort[] sizes)
+    {
+        var list = new List<byte>();
+        foreach (var size in sizes)
+        {
+            list.AddRange(BitConverter.GetBytes(size));
+            list.AddRange(new byte[Math.Max(0, size - 2)]);
+        }
+
+        list.AddRange(new byte[2]);
+        return [.. list];
+    }
+
+    [Fact]
+    public void Accepts_a_complete_list()
+    {
+        var bytes = Chain(6, 10);
+        Assert.True(ShellInterop.IsValidIdList(bytes, 0, 0));
+    }
+
+    [Fact]
+    public void Rejects_offsets_outside_the_buffer_or_before_the_header()
+    {
+        var bytes = Chain(6);
+        Assert.False(ShellInterop.IsValidIdList(bytes, bytes.Length, 0));
+        Assert.False(ShellInterop.IsValidIdList(bytes, -1, 0));
+        Assert.False(ShellInterop.IsValidIdList(bytes, 0, 4));
+    }
+
+    [Fact]
+    public void Rejects_pieces_that_run_past_the_end_or_have_no_size()
+    {
+        var bytes = Chain(6);
+        bytes[0] = 200;
+        Assert.False(ShellInterop.IsValidIdList(bytes, 0, 0));
+        Assert.False(ShellInterop.IsValidIdList([1, 0, 0, 0], 0, 0));
+        Assert.False(ShellInterop.IsValidIdList([4, 0, 0], 0, 0));
+    }
+}
