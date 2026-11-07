@@ -200,4 +200,143 @@ public class JsonSettingsStoreTests
 
         Assert.Throws<IOException>(() => store.Export(sandbox.Dir));
     }
+
+    [Fact]
+    public void LockedFileDuringLoad_IsNotLostBySaveAfterUnlock()
+    {
+        using var sandbox = new TestSandbox();
+        const string original = "{ \"hotkey\": { \"holdDelayMs\": 222 } }";
+        File.WriteAllText(sandbox.SettingsFile, original);
+        var store = new JsonSettingsStore(sandbox.SettingsFile, TimeSpan.Zero);
+
+        using (new FileStream(sandbox.SettingsFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            store.Load();
+        }
+
+        store.Save();
+
+        Assert.Equal(original, File.ReadAllText(sandbox.BrokenFile));
+    }
+
+    [Fact]
+    public void BrokenPathIsDirectory_SaveDoesNotOverwriteUnreadableFile()
+    {
+        using var sandbox = new TestSandbox();
+        const string damaged = "{ this is not json";
+        File.WriteAllText(sandbox.SettingsFile, damaged);
+        Directory.CreateDirectory(sandbox.BrokenFile);
+        var store = new JsonSettingsStore(sandbox.SettingsFile, TimeSpan.Zero);
+
+        store.Load();
+        store.Current.Hotkey.HoldDelayMs = 999;
+        store.Save();
+
+        Assert.Equal(damaged, File.ReadAllText(sandbox.SettingsFile));
+    }
+
+    [Fact]
+    public void ReadOnlySettingsFile_IsReplacedBySave()
+    {
+        using var sandbox = new TestSandbox();
+        File.WriteAllText(sandbox.SettingsFile, "{ \"hotkey\": { \"holdDelayMs\": 200 } }");
+        File.SetAttributes(sandbox.SettingsFile, FileAttributes.ReadOnly);
+        var store = new JsonSettingsStore(sandbox.SettingsFile, TimeSpan.Zero);
+        store.Load();
+        store.Current.Hotkey.HoldDelayMs = 300;
+
+        store.Save();
+
+        Assert.Equal(300, SettingsJson.Deserialize(File.ReadAllText(sandbox.SettingsFile))!.Hotkey.HoldDelayMs);
+    }
+
+    [Fact]
+    public void ReadOnlyLeftoverTempFile_DoesNotLoseSettingsOrThrow()
+    {
+        using var sandbox = new TestSandbox();
+        const string original = "{ \"hotkey\": { \"holdDelayMs\": 200 } }";
+        File.WriteAllText(sandbox.SettingsFile, original);
+        var tempFile = sandbox.SettingsFile + ".tmp";
+        File.WriteAllText(tempFile, "stale");
+        File.SetAttributes(tempFile, FileAttributes.ReadOnly);
+        try
+        {
+            var store = new JsonSettingsStore(sandbox.SettingsFile, TimeSpan.Zero);
+            store.Load();
+            store.Current.Hotkey.HoldDelayMs = 300;
+
+            store.Save();
+
+            Assert.Equal(original, File.ReadAllText(sandbox.SettingsFile));
+        }
+        finally
+        {
+            File.SetAttributes(tempFile, FileAttributes.Normal);
+        }
+    }
+
+    [Fact]
+    public void ThrowingChangedListener_DoesNotStopSaveOrImport()
+    {
+        using var sandbox = new TestSandbox();
+        var store = new JsonSettingsStore(sandbox.SettingsFile, TimeSpan.Zero);
+        store.Load();
+        store.Changed += (_, _) => throw new InvalidOperationException("listener bug");
+        store.Current.Hotkey.HoldDelayMs = 300;
+
+        store.Save();
+        Assert.Equal(300, SettingsJson.Deserialize(File.ReadAllText(sandbox.SettingsFile))!.Hotkey.HoldDelayMs);
+
+        var importPath = Path.Combine(sandbox.Dir, "import.json");
+        File.WriteAllText(importPath, "{ \"hotkey\": { \"holdDelayMs\": 400 } }");
+
+        Assert.True(store.Import(importPath));
+        Assert.Equal(400, store.Current.Hotkey.HoldDelayMs);
+    }
+
+    [Fact]
+    public void NewerVersionFile_IsBackedUpBeforeFirstOverwrite()
+    {
+        using var sandbox = new TestSandbox();
+        const string original = "{ \"version\": 7, \"hotkey\": { \"holdDelayMs\": 200 } }";
+        File.WriteAllText(sandbox.SettingsFile, original);
+        var store = new JsonSettingsStore(sandbox.SettingsFile, TimeSpan.Zero);
+        store.Load();
+        store.Current.Hotkey.HoldDelayMs = 300;
+
+        store.Save();
+
+        Assert.Equal(original, File.ReadAllText(Path.Combine(sandbox.Dir, "settings.v7.bak")));
+    }
+
+    [Fact]
+    public void FileOver5Mb_IsMovedAsideOnLoad()
+    {
+        using var sandbox = new TestSandbox();
+        File.WriteAllText(sandbox.SettingsFile, "{" + new string(' ', 6 * 1024 * 1024) + "}");
+        var store = new JsonSettingsStore(sandbox.SettingsFile, TimeSpan.Zero);
+
+        store.Load();
+
+        Assert.True(File.Exists(sandbox.BrokenFile));
+        Assert.False(File.Exists(sandbox.SettingsFile));
+        Assert.Equal(
+            SettingsTestHelpers.Json(LoadoutSettings.CreateDefault()),
+            SettingsTestHelpers.Json(store.Current));
+        Assert.Contains("larger than 5 MB", File.ReadAllText(AppPaths.LogFile), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FileOver5Mb_ImportReturnsFalseAndChangesNothing()
+    {
+        using var sandbox = new TestSandbox();
+        var store = new JsonSettingsStore(sandbox.SettingsFile, TimeSpan.Zero);
+        store.Load();
+        var before = store.Current;
+        var bigPath = Path.Combine(sandbox.Dir, "big.json");
+        File.WriteAllText(bigPath, "{" + new string(' ', 6 * 1024 * 1024) + "}");
+
+        Assert.False(store.Import(bigPath));
+        Assert.Same(before, store.Current);
+    }
 }

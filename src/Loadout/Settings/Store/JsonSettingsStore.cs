@@ -17,17 +17,29 @@ public sealed class JsonSettingsStore : ISettingsStore
 
     private const string BrokenFileName = "settings.broken.json";
 
+    /// <summary>Files larger than this are treated as damaged (Load) or rejected (Import).</summary>
+    private const long MaxFileBytes = 5 * 1024 * 1024;
+
     private readonly string _file;
+    private readonly string _directory;
     private readonly string _brokenFile;
     private readonly TimeSpan _saveDelay;
 
     private DispatcherTimer? _timer;
     private bool _pending;
 
+    // Set when the file could not be read or moved aside. Before the next overwrite, the file is copied
+    // to settings.broken.json so the user's data survives. Cleared once that copy succeeds.
+    private bool _preserveExisting;
+
+    // Set by Load when the file was written by a newer Loadout. Copied once to settings.v{N}.bak before the first overwrite.
+    private int? _newerVersionToBackUp;
+
     public JsonSettingsStore(string? settingsFile = null, TimeSpan? saveDelay = null)
     {
         _file = Path.GetFullPath(settingsFile ?? AppPaths.SettingsFile);
-        _brokenFile = Path.Combine(Path.GetDirectoryName(_file)!, BrokenFileName);
+        _directory = Path.GetDirectoryName(_file)!;
+        _brokenFile = Path.Combine(_directory, BrokenFileName);
 
         var delay = saveDelay ?? DefaultSaveDelay;
         _saveDelay = delay < TimeSpan.Zero ? TimeSpan.Zero : delay;
@@ -46,6 +58,12 @@ public sealed class JsonSettingsStore : ISettingsStore
             if (!File.Exists(_file))
             {
                 Current = LoadoutSettings.CreateDefault();
+                return;
+            }
+
+            if (new FileInfo(_file).Length > MaxFileBytes)
+            {
+                MoveBrokenFileAside("larger than 5 MB", null);
                 return;
             }
 
@@ -68,30 +86,37 @@ public sealed class JsonSettingsStore : ISettingsStore
                 return;
             }
 
+            if (parsed.Version > LoadoutSettings.CurrentVersion)
+            {
+                _newerVersionToBackUp = parsed.Version;
+            }
+
             Current = SettingsNormalizer.Normalize(parsed);
         }
         catch (Exception ex)
         {
-            // Unreadable (locked, no access, ...). The file is left alone, so nothing is lost.
-            Log.Error("Could not read settings.json. Default settings are used for now.", ex);
+            // Unreadable (locked, no access, ...). The file is kept; it is copied to settings.broken.json before any overwrite.
+            Log.Error("Could not read settings.json. Default settings are used for now, and the file is kept.", ex);
+            _preserveExisting = true;
             Current = LoadoutSettings.CreateDefault();
         }
     }
 
     public void Save()
     {
-        Changed?.Invoke(this, EventArgs.Empty);
-
         if (_saveDelay == TimeSpan.Zero)
         {
             WriteNow();
-            return;
+        }
+        else
+        {
+            _pending = true;
+            _timer ??= CreateTimer();
+            _timer.Stop();
+            _timer.Start();
         }
 
-        _pending = true;
-        _timer ??= CreateTimer();
-        _timer.Stop();
-        _timer.Start();
+        RaiseChanged();
     }
 
     public void Flush()
@@ -136,6 +161,12 @@ public sealed class JsonSettingsStore : ISettingsStore
                 return false;
             }
 
+            if (new FileInfo(filePath).Length > MaxFileBytes)
+            {
+                Log.Error($"Could not import settings from {filePath}: the file is larger than 5 MB. Nothing was changed.");
+                return false;
+            }
+
             var parsed = SettingsJson.Deserialize(File.ReadAllText(filePath, Encoding.UTF8));
             if (parsed is null)
             {
@@ -149,6 +180,18 @@ public sealed class JsonSettingsStore : ISettingsStore
         {
             Log.Error($"Could not import settings from {filePath}. Nothing was changed.", ex);
             return false;
+        }
+    }
+
+    private void RaiseChanged()
+    {
+        try
+        {
+            Changed?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("A settings Changed listener threw.", ex);
         }
     }
 
@@ -173,12 +216,61 @@ public sealed class JsonSettingsStore : ISettingsStore
         _pending = false;
         try
         {
+            if (!PrepareToOverwrite())
+            {
+                return;
+            }
+
             WriteAtomic(_file, Current);
         }
         catch (Exception ex)
         {
             Log.Error("Could not save settings.json.", ex);
         }
+    }
+
+    /// <summary>
+    /// Runs before anything replaces settings.json. Returns false when the write must be skipped
+    /// because the existing file could not be preserved.
+    /// </summary>
+    private bool PrepareToOverwrite()
+    {
+        if (!File.Exists(_file))
+        {
+            _preserveExisting = false;
+            return true;
+        }
+
+        if (_newerVersionToBackUp is int version)
+        {
+            _newerVersionToBackUp = null;
+            try
+            {
+                File.Copy(_file, Path.Combine(_directory, $"settings.v{version}.bak"), overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Could not back up the settings.json written by a newer version (v{version}). Continuing.", ex);
+            }
+        }
+
+        if (!_preserveExisting)
+        {
+            return true;
+        }
+
+        try
+        {
+            File.Copy(_file, _brokenFile, overwrite: true);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Could not copy the unreadable settings.json to settings.broken.json, so the save was skipped to keep the file.", ex);
+            return false;
+        }
+
+        _preserveExisting = false;
+        return true;
     }
 
     private void MoveBrokenFileAside(string reason, Exception? exception)
@@ -190,7 +282,8 @@ public sealed class JsonSettingsStore : ISettingsStore
         }
         catch (Exception ex)
         {
-            Log.Error("Could not move the damaged settings.json aside.", ex);
+            _preserveExisting = true;
+            Log.Error("Could not move the damaged settings.json to settings.broken.json. The file is kept, and the next save copies it first.", ex);
         }
 
         Current = LoadoutSettings.CreateDefault();
@@ -206,21 +299,42 @@ public sealed class JsonSettingsStore : ISettingsStore
         try
         {
             File.WriteAllText(tempPath, SettingsJson.Serialize(settings), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            ClearReadOnly(fullPath);
             File.Move(tempPath, fullPath, overwrite: true);
         }
         finally
         {
-            if (File.Exists(tempPath))
+            TryDelete(tempPath);
+        }
+    }
+
+    private static void ClearReadOnly(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        var attributes = File.GetAttributes(path);
+        if ((attributes & FileAttributes.ReadOnly) != 0)
+        {
+            File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+        }
+    }
+
+    /// <summary>Deletes a leftover temp file. Never throws, so a cleanup failure cannot hide the real error.</summary>
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
             {
-                try
-                {
-                    File.Delete(tempPath);
-                }
-                catch (IOException)
-                {
-                    // Leftover temp file; the next save overwrites it.
-                }
+                File.Delete(path);
             }
+        }
+        catch (Exception)
+        {
+            // Leftover temp file; the next save overwrites it.
         }
     }
 }
