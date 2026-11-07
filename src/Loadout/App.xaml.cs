@@ -51,7 +51,7 @@ public partial class App : Application
                 wheel,
                 new PlaceholderLauncher(),
                 icons,
-                new PlaceholderGameModePolicy(),
+                new FullscreenGameModePolicy(settings),
                 new PlaceholderSettingsWindow(),
                 new TrayIcon());
             _host.ExitRequested += (_, _) => Shutdown();
