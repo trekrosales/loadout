@@ -7,6 +7,7 @@ using Loadout.Input;
 using Loadout.Launching;
 using Loadout.Settings.Store;
 using Loadout.Settings.Window;
+using Loadout.Startup;
 using Loadout.Tray;
 using Loadout.Wheel;
 
@@ -49,10 +50,10 @@ public partial class App : Application
                 settings,
                 input,
                 wheel,
-                new PlaceholderLauncher(),
+                new ShellLauncher(),
                 icons,
                 new FullscreenGameModePolicy(settings),
-                new PlaceholderSettingsWindow(),
+                new SettingsWindowService(settings, input, icons, new RunKeyStartupRegistration()),
                 new TrayIcon());
             _host.ExitRequested += (_, _) => Shutdown();
             _host.Start();
