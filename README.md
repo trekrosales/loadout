@@ -4,7 +4,7 @@ A radial app launcher for Windows, inspired by the weapon wheels in action games
 
 Hold **Ctrl + Alt** and a small glass wheel appears at your cursor. Move the mouse toward an app, folder or website and let go to open it. Scroll to switch between groups of 8.
 
-> **Status:** planning. Nothing is built yet.
+> **Status:** planning. Nothing is built yet. See [SPEC.md](SPEC.md) for the full design.
 
 ## Planned features
 
