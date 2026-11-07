@@ -1,7 +1,4 @@
-﻿namespace Loadout.Input;
-
-/// <summary>What happened when the wheel was asked to open.</summary>
-internal readonly record struct OpenDecision(bool Opened, bool BlockMouse, int CursorX, int CursorY);
+namespace Loadout.Input;
 
 /// <summary>A key or mouse button event to inject, in order.</summary>
 internal readonly record struct InjectedKey(int Vk, bool Up);
@@ -14,14 +11,20 @@ internal interface IHotkeyEffects
 
     void StopHoldTimer();
 
-    /// <summary>Inject these key or button events, in order, marked so the hooks ignore them.</summary>
-    void Inject(IReadOnlyList<InjectedKey> keys);
+    /// <summary>Inject these key or button events, in order, marked so the hooks ignore them. Returns false if it failed.</summary>
+    bool Inject(IReadOnlyList<InjectedKey> keys);
 
     /// <summary>True if the key is physically down right now (GetAsyncKeyState). Only asked for keys that were passed through.</summary>
     bool IsPhysicallyDown(int vk);
 
-    /// <summary>Raise OpenRequested now (synchronously, outside any hook) and report the result.</summary>
-    OpenDecision RequestOpen();
+    /// <summary>The cursor position in physical pixels.</summary>
+    (int X, int Y) GetCursor();
+
+    /// <summary>
+    /// The wheel is opening. Tell the UI (without waiting); it answers later through
+    /// <see cref="HotkeyStateMachine.ApplyOpenDecision"/> with the same <paramref name="openId"/>.
+    /// </summary>
+    void OpenRequested(int openId, int x, int y);
 
     void Released();
 
@@ -52,15 +55,17 @@ internal enum HotkeyState
 /// <summary>
 /// Decides what every key, button, wheel and mouse movement means (SPEC section 2), with no Windows calls of its own,
 /// so it can be unit-tested. Each On* method returns true when the input must be swallowed (kept from other apps).
-/// Single-threaded: called only on the UI thread, from the hook callbacks and the hold timer.
+/// Single-threaded: called only on the input thread, from the hook callbacks, the hold timer and posted work.
 /// <para>Rules:</para>
 /// <list type="bullet">
-/// <item>The hotkey arms when all its groups are held. Keys held <em>before</em> that (for example W in a game) don't matter.</item>
+/// <item>The hotkey arms when all its groups are held. Keys held <em>before</em> that (for example W in a game) don't matter.
+/// With a trigger key (Ctrl + Q, a mouse button), only pressing the trigger last arms, like a normal shortcut.</item>
 /// <item>Any new key or button pressed, or wheel scrolled, while arming cancels the attempt and that input goes through normally,
 /// so shortcuts like Ctrl + Alt + T keep working.</item>
-/// <item>The trigger key (a non-modifier hotkey key, if any) is held back while in use and replayed if the wheel never opens.</item>
-/// <item>While open: movement is swallowed when BlockMouse; clicks, scrolling and every other key are always swallowed;
-/// Esc cancels; 1-8 pick a slot; releasing the hotkey launches.</item>
+/// <item>The trigger key is held back while in use and replayed if the wheel never opens.</item>
+/// <item>While open: movement is swallowed when BlockMouse; clicks, scrolling and newly pressed keys are always swallowed;
+/// Esc cancels; 1-8 pick a slot; releasing the hotkey launches. Keys already held before opening keep passing through,
+/// so their release always reaches the app.</item>
 /// <item>After the wheel was open, releasing Alt or Win is masked so the app in front doesn't open its menu or Start.</item>
 /// </list>
 /// </summary>
@@ -71,12 +76,17 @@ internal sealed class HotkeyStateMachine
     private readonly IHotkeyEffects _effects;
     private readonly HashSet<int> _down = [];
     private readonly HashSet<int> _swallowed = [];
+    private readonly HashSet<int> _swallowUntilReleased = [];
+    private readonly Func<int, bool> _isDown;
+    private readonly Func<int, bool> _isHeldOrPhysical;
     private HotkeyDefinition _hotkey = HotkeyDefinition.Default;
+    private HotkeyDefinition? _pendingHotkey;
     private bool _enabled = true;
 
     private bool _triggerHeldBack;
     private bool _openedThisPress;
     private bool _blockMouse;
+    private int _openId;
     private int _lastX;
     private int _lastY;
     private double _aimX;
@@ -86,6 +96,8 @@ internal sealed class HotkeyStateMachine
     public HotkeyStateMachine(IHotkeyEffects effects)
     {
         _effects = effects;
+        _isDown = _down.Contains;
+        _isHeldOrPhysical = vk => _down.Contains(vk) && (IsHeldBack(vk) || _effects.IsPhysicallyDown(vk));
     }
 
     public HotkeyState State { get; private set; } = HotkeyState.Idle;
@@ -109,22 +121,47 @@ internal sealed class HotkeyStateMachine
             if (!value)
             {
                 Interrupt();
+                _enabled = false;
+                return;
             }
 
-            _enabled = value;
+            // Releases that happened while disabled were never seen: start clean.
+            _enabled = true;
+            ForgetKeysNotPhysicallyDown(except: -1);
+            if (State == HotkeyState.WaitRelease && !AnyHotkeyKeyDown())
+            {
+                ResetToIdle();
+            }
         }
     }
 
+    /// <summary>Applies a new hotkey now if idle, otherwise as soon as the current press is over.</summary>
     public void SetHotkey(HotkeyDefinition hotkey)
     {
         ArgumentNullException.ThrowIfNull(hotkey);
         if (hotkey.Text == _hotkey.Text)
         {
+            _pendingHotkey = null;
             return;
         }
 
-        Interrupt();
-        _hotkey = hotkey;
+        if (State == HotkeyState.Idle)
+        {
+            _hotkey = hotkey;
+            _pendingHotkey = null;
+            return;
+        }
+
+        if (State == HotkeyState.Arming)
+        {
+            Interrupt();
+        }
+
+        _pendingHotkey = hotkey;
+        if (State == HotkeyState.Idle)
+        {
+            ApplyPendingHotkey();
+        }
     }
 
     /// <summary>
@@ -159,6 +196,10 @@ internal sealed class HotkeyStateMachine
         if (down)
         {
             isRepeat = !_down.Add(vk);
+            if (!isRepeat)
+            {
+                _swallowUntilReleased.Remove(vk);
+            }
         }
         else
         {
@@ -169,6 +210,18 @@ internal sealed class HotkeyStateMachine
         if (!_enabled)
         {
             return false;
+        }
+
+        // A key whose press was swallowed while the wheel was open, still held after it closed:
+        // keep swallowing its repeats and its release so the app never sees half a key press.
+        if (_swallowUntilReleased.Contains(vk) && (isRepeat || !down))
+        {
+            if (!down)
+            {
+                _swallowUntilReleased.Remove(vk);
+            }
+
+            return true;
         }
 
         return State switch
@@ -221,10 +274,13 @@ internal sealed class HotkeyStateMachine
 
         // Safety net: if the hotkey's keys were released somewhere we couldn't see
         // (lock screen, an admin window), close instead of holding the mouse hostage.
-        if (!HotkeyStillHeld())
+        // Note: a held-back trigger (for example a mouse-button hotkey) always counts as held,
+        // because its state can't be checked; Esc still cancels in that case.
+        if (!_hotkey.IsSatisfied(_isHeldOrPhysical))
         {
             State = HotkeyState.WaitRelease;
             _effects.Cancelled();
+            ForgetKeysNotPhysicallyDown(except: -1);
             if (!AnyHotkeyKeyDown())
             {
                 ResetToIdle();
@@ -245,7 +301,7 @@ internal sealed class HotkeyStateMachine
         return _blockMouse;
     }
 
-    /// <summary>The hold-delay timer fired.</summary>
+    /// <summary>The hold-delay timer fired: open the wheel (the UI confirms later via <see cref="ApplyOpenDecision"/>).</summary>
     public void OnHoldElapsed()
     {
         if (!_enabled || State != HotkeyState.Arming)
@@ -253,7 +309,7 @@ internal sealed class HotkeyStateMachine
             return;
         }
 
-        if (!HotkeyStillHeld())
+        if (!_hotkey.IsSatisfied(_isHeldOrPhysical))
         {
             // A release was missed; start over.
             GiveBackTrigger();
@@ -262,21 +318,48 @@ internal sealed class HotkeyStateMachine
             return;
         }
 
-        var decision = _effects.RequestOpen();
-        if (!decision.Opened)
+        var (x, y) = _effects.GetCursor();
+        State = HotkeyState.Open;
+        _openedThisPress = true;
+        _blockMouse = true;
+        _openId++;
+        _lastX = x;
+        _lastY = y;
+        _aimX = _aimY = 0;
+        _wheelRemainder = 0;
+        _effects.OpenRequested(_openId, x, y);
+    }
+
+    /// <summary>
+    /// The UI's answer to <see cref="IHotkeyEffects.OpenRequested"/>. Ignored if that open is already over.
+    /// When refused, the press behaves as if the wheel never opened.
+    /// </summary>
+    public void ApplyOpenDecision(int openId, bool cancel, bool blockMouse)
+    {
+        if (openId != _openId || State != HotkeyState.Open)
         {
-            GiveBackTrigger();
-            State = HotkeyState.WaitRelease;
             return;
         }
 
-        State = HotkeyState.Open;
-        _openedThisPress = true;
-        _blockMouse = decision.BlockMouse;
-        _lastX = decision.CursorX;
-        _lastY = decision.CursorY;
-        _aimX = _aimY = 0;
-        _wheelRemainder = 0;
+        if (!cancel)
+        {
+            _blockMouse = blockMouse;
+            return;
+        }
+
+        _openedThisPress = false;
+        if (_hotkey.Trigger is { } trigger && _down.Contains(trigger))
+        {
+            _triggerHeldBack = true;
+            GiveBackTrigger();
+        }
+
+        State = HotkeyState.WaitRelease;
+        _swallowed.Clear();
+        if (!AnyHotkeyKeyDown())
+        {
+            ResetToIdle();
+        }
     }
 
     private bool OnIdleKeyDown(int vk)
@@ -286,10 +369,16 @@ internal sealed class HotkeyStateMachine
             return false;
         }
 
+        // With a trigger key, only pressing the trigger last arms (its earlier press already reached the app).
+        if (_hotkey.Trigger is { } trigger && vk != trigger)
+        {
+            return false;
+        }
+
         // Missed key-ups (for example while an admin window had focus) must not leave keys "stuck down".
         ForgetKeysNotPhysicallyDown(except: vk);
 
-        if (!_hotkey.IsSatisfied(_down.Contains))
+        if (!_hotkey.IsSatisfied(_isDown))
         {
             return false;
         }
@@ -325,7 +414,7 @@ internal sealed class HotkeyStateMachine
             return false;
         }
 
-        if (!_hotkey.Contains(vk) || _hotkey.IsSatisfied(_down.Contains))
+        if (!_hotkey.Contains(vk) || _hotkey.IsSatisfied(_isDown))
         {
             return false;
         }
@@ -335,9 +424,8 @@ internal sealed class HotkeyStateMachine
         var swallow = false;
         if (vk == _hotkey.Trigger && _triggerHeldBack)
         {
-            _effects.Inject([new InjectedKey(vk, Up: false), new InjectedKey(vk, Up: true)]);
+            swallow = _effects.Inject([new InjectedKey(vk, Up: false), new InjectedKey(vk, Up: true)]);
             _triggerHeldBack = false;
-            swallow = true;
         }
         else
         {
@@ -357,6 +445,13 @@ internal sealed class HotkeyStateMachine
                 return vk == _hotkey.Trigger;
             }
 
+            // Auto-repeat of a key held since before the wheel opened: its press reached the app,
+            // so let it keep going and never swallow its release.
+            if (isRepeat && !_swallowed.Contains(vk))
+            {
+                return false;
+            }
+
             if (vk == VirtualKeys.Escape)
             {
                 _swallowed.Add(vk);
@@ -371,7 +466,7 @@ internal sealed class HotkeyStateMachine
                 _effects.SlotKey(slot);
             }
 
-            // Everything else is kept from other apps while the wheel is open.
+            // Newly pressed keys are kept from other apps while the wheel is open.
             _swallowed.Add(vk);
             return true;
         }
@@ -381,22 +476,36 @@ internal sealed class HotkeyStateMachine
             return true;
         }
 
-        if (!_hotkey.Contains(vk) || _hotkey.IsSatisfied(_down.Contains))
+        if (!_hotkey.Contains(vk) || _hotkey.IsSatisfied(_isDown))
         {
             return false;
         }
 
         State = HotkeyState.WaitRelease;
         _effects.Released();
-        return ReleaseHotkeyKeyAfterOpen(vk);
+        var swallowRelease = ReleaseHotkeyKeyAfterOpen(vk);
+        if (!AnyHotkeyKeyDown())
+        {
+            ResetToIdle();
+        }
+
+        return swallowRelease;
     }
 
     private bool OnWaitReleaseKey(int vk, bool down)
     {
         if (down)
         {
+            ForgetKeysNotPhysicallyDown(except: vk);
+
             // Keep holding back trigger auto-repeat after the wheel was used.
-            return vk == _hotkey.Trigger && _openedThisPress;
+            var swallowDown = vk == _hotkey.Trigger && _openedThisPress;
+            if (!AnyHotkeyKeyDown())
+            {
+                ResetToIdle();
+            }
+
+            return swallowDown;
         }
 
         var swallow = _swallowed.Remove(vk);
@@ -408,9 +517,8 @@ internal sealed class HotkeyStateMachine
             }
             else if (vk == _hotkey.Trigger && _triggerHeldBack)
             {
-                _effects.Inject([new InjectedKey(vk, Up: false), new InjectedKey(vk, Up: true)]);
+                swallow = _effects.Inject([new InjectedKey(vk, Up: false), new InjectedKey(vk, Up: true)]);
                 _triggerHeldBack = false;
-                swallow = true;
             }
         }
 
@@ -432,13 +540,13 @@ internal sealed class HotkeyStateMachine
 
         if (VirtualKeys.NeedsReleaseMask(vk))
         {
-            _effects.Inject(
+            // Only swallow the real release if the masked replacement was actually sent.
+            return _effects.Inject(
             [
                 new InjectedKey(VirtualKeys.MenuMask, Up: false),
                 new InjectedKey(VirtualKeys.MenuMask, Up: true),
                 new InjectedKey(vk, Up: true),
             ]);
-            return true;
         }
 
         return false;
@@ -463,13 +571,21 @@ internal sealed class HotkeyStateMachine
         _triggerHeldBack = false;
     }
 
-    private bool HotkeyStillHeld() =>
-        _hotkey.IsSatisfied(vk => _down.Contains(vk) && (IsHeldBack(vk) || _effects.IsPhysicallyDown(vk)));
-
     private bool IsHeldBack(int vk) =>
         (vk == _hotkey.Trigger && (_triggerHeldBack || _openedThisPress)) || _swallowed.Contains(vk);
 
-    private bool AnyHotkeyKeyDown() => _down.Any(_hotkey.Contains);
+    private bool AnyHotkeyKeyDown()
+    {
+        foreach (var vk in _down)
+        {
+            if (_hotkey.Contains(vk))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private void ForgetKeysNotPhysicallyDown(int except)
     {
@@ -481,7 +597,27 @@ internal sealed class HotkeyStateMachine
         State = HotkeyState.Idle;
         _triggerHeldBack = false;
         _openedThisPress = false;
+
+        // Keys swallowed while open and still held: keep swallowing their repeats and release.
+        foreach (var vk in _swallowed)
+        {
+            if (_down.Contains(vk))
+            {
+                _swallowUntilReleased.Add(vk);
+            }
+        }
+
         _swallowed.Clear();
         _wheelRemainder = 0;
+        ApplyPendingHotkey();
+    }
+
+    private void ApplyPendingHotkey()
+    {
+        if (_pendingHotkey is not null)
+        {
+            _hotkey = _pendingHotkey;
+            _pendingHotkey = null;
+        }
     }
 }

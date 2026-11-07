@@ -41,7 +41,30 @@ internal sealed class HotkeyDefinition
     public bool Contains(int vk) => _all.Contains(vk);
 
     /// <summary>True when every group has at least one key for which <paramref name="isDown"/> is true.</summary>
-    public bool IsSatisfied(Func<int, bool> isDown) => Groups.All(g => g.Any(isDown));
+    public bool IsSatisfied(Func<int, bool> isDown)
+    {
+        // Plain loops: this runs on every mouse move while the wheel is open.
+        for (var g = 0; g < Groups.Count; g++)
+        {
+            var group = Groups[g];
+            var any = false;
+            for (var i = 0; i < group.Length; i++)
+            {
+                if (isDown(group[i]))
+                {
+                    any = true;
+                    break;
+                }
+            }
+
+            if (!any)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Parses the settings tokens (see HotkeySettings.Keys). Throws <see cref="FormatException"/> for unknown names,

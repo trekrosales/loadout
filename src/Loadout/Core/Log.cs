@@ -18,6 +18,9 @@ public static class Log
     private static readonly Lock s_gate = new();
     private static readonly bool s_trace = Environment.GetEnvironmentVariable(TraceVariable) == "1";
 
+    /// <summary>True when <see cref="Trace"/> writes anything. Check it before building expensive trace messages.</summary>
+    public static bool IsTraceEnabled => s_trace;
+
     /// <summary>
     /// Diagnostic message, written only when LOADOUT_TRACE=1. Used by reviewers to see what the app did.
     /// Never logs typed keys, only Loadout's own events.

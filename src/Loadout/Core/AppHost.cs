@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Windows;
 using System.Windows.Threading;
 using Loadout.Contracts;
@@ -60,7 +60,11 @@ public sealed class AppHost : IDisposable
         _input.OpenRequested += OnOpenRequested;
         _input.AimChanged += (_, e) =>
         {
-            Log.Trace($"Aim {e.Dx:0},{e.Dy:0}");
+            if (Log.IsTraceEnabled)
+            {
+                Log.Trace($"Aim {e.Dx:0},{e.Dy:0}");
+            }
+
             _wheel.UpdateAim(e.Dx, e.Dy);
         };
         _input.GroupScrolled += (_, delta) =>
