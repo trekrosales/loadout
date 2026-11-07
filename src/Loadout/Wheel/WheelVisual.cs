@@ -284,6 +284,13 @@ internal sealed class WheelVisual : Canvas
         StyleText(_groupName, nameSize * 0.8, 0.72, FontWeights.Normal, textWidth);
         StyleText(_pager, nameSize * 0.75, 0.55, FontWeights.Normal, textWidth);
 
+        // On a rebuild (icon size or colors changed) the text blocks still belong to the previous panel:
+        // detach them first, or WPF refuses to add them to the new one.
+        foreach (var text in (TextBlock[])[_cancelGlyph, _name, _groupName, _pager])
+        {
+            (text.Parent as Panel)?.Children.Remove(text);
+        }
+
         var stack = new StackPanel { Width = textWidth, VerticalAlignment = VerticalAlignment.Center };
         stack.Children.Add(_cancelGlyph);
         stack.Children.Add(_name);
