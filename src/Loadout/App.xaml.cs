@@ -43,7 +43,7 @@ public partial class App : Application
 
             var settings = new InMemorySettingsStore();
             var icons = new PlaceholderIconProvider();
-            var input = new PlaceholderInputService();
+            var input = new LowLevelInputService();
             _host = new AppHost(
                 settings,
                 input,

@@ -12,7 +12,23 @@ public static class Log
 {
     public const long MaxBytes = 512 * 1024;
 
+    /// <summary>Set this environment variable to 1 to also log <see cref="Trace"/> messages (for testing only).</summary>
+    public const string TraceVariable = "LOADOUT_TRACE";
+
     private static readonly Lock s_gate = new();
+    private static readonly bool s_trace = Environment.GetEnvironmentVariable(TraceVariable) == "1";
+
+    /// <summary>
+    /// Diagnostic message, written only when LOADOUT_TRACE=1. Used by reviewers to see what the app did.
+    /// Never logs typed keys, only Loadout's own events.
+    /// </summary>
+    public static void Trace(string message)
+    {
+        if (s_trace)
+        {
+            Error("TRACE " + message);
+        }
+    }
 
     public static void Error(string message, Exception? exception = null)
     {
