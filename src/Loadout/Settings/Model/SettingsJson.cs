@@ -33,8 +33,48 @@ public static class SettingsJson
             AllowTrailingCommas = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.Never,
         };
+        options.Converters.Add(new TolerantSlotTypeConverter());
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
         options.MakeReadOnly(populateMissingResolver: true);
         return options;
+    }
+
+    /// <summary>
+    /// Reads an unknown slot type (a typo, or a type from a newer Loadout) as an undefined value instead of failing,
+    /// so only that slot is emptied by the normalizer, not the whole file.
+    /// </summary>
+    private sealed class TolerantSlotTypeConverter : JsonConverter<SlotType>
+    {
+        public const SlotType Unknown = (SlotType)(-1);
+
+        public override SlotType Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.Number)
+            {
+                return reader.TryGetInt32(out var number) ? (SlotType)number : Unknown;
+            }
+
+            if (reader.TokenType == JsonTokenType.String
+                && Enum.TryParse<SlotType>(reader.GetString(), ignoreCase: true, out var value)
+                && Enum.IsDefined(value)
+                && !int.TryParse(reader.GetString(), out _))
+            {
+                return value;
+            }
+
+            return Unknown;
+        }
+
+        public override void Write(Utf8JsonWriter writer, SlotType value, JsonSerializerOptions options)
+        {
+            var name = Enum.IsDefined(value) ? value.ToString() : null;
+            if (name is null)
+            {
+                writer.WriteNumberValue((int)value);
+                return;
+            }
+
+            writer.WriteStringValue(JsonNamingPolicy.CamelCase.ConvertName(name));
+        }
     }
 }
