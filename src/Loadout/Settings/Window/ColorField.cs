@@ -31,8 +31,8 @@ internal sealed class ColorField : StackPanel
                 Height = 26,
                 CornerRadius = new CornerRadius(13),
                 Background = Palette.Make(color),
-                BorderThickness = new Thickness(2),
-                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(1),
+                BorderBrush = Palette.Line,
                 Margin = new Thickness(0, 0, 8, 6),
                 Cursor = Cursors.Hand,
                 ToolTip = color,
@@ -98,7 +98,8 @@ internal sealed class ColorField : StackPanel
         {
             _swatches[i].BorderBrush = string.Equals(_presets[i], hex, StringComparison.OrdinalIgnoreCase)
                 ? Palette.Text
-                : Brushes.Transparent;
+                : Palette.Line;
+            _swatches[i].BorderThickness = new Thickness(string.Equals(_presets[i], hex, StringComparison.OrdinalIgnoreCase) ? 2 : 1);
         }
 
         if (updateBox)

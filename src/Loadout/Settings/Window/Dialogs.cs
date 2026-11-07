@@ -14,6 +14,7 @@ internal class DialogShell : System.Windows.Window
     public DialogShell(System.Windows.Window? owner, string title, double width, double height)
     {
         Owner = owner;
+        Title = title;
         Width = width;
         if (height > 0)
         {

@@ -12,13 +12,13 @@ namespace Loadout.Settings.Window;
 /// <summary>General section: start with Windows, export and import, reset, settings folder, About.</summary>
 internal sealed class GeneralPage : SectionPage
 {
-    private readonly ToggleButton _startup = UiKit.Switch();
+    private readonly ToggleButton _startup = UiKit.Switch("Start with Windows");
     private readonly TextBlock _message = UiKit.Note(string.Empty);
 
     public GeneralPage(SettingsContext ctx)
         : base(ctx, "General", "Start-up, backups and information about Loadout.")
     {
-        _startup.Click += (_, _) => OnStartupClicked();
+        UiKit.OnToggled(_startup, OnStartupChanged);
         Body.Children.Add(UiKit.Card(UiKit.Row("Start with Windows", "Open Loadout in the tray when you sign in.", _startup)));
 
         var export = UiKit.MakeButton("Export settings…", (_, _) => Export());
@@ -86,21 +86,15 @@ internal sealed class GeneralPage : SectionPage
         return plus > 0 ? info[..plus] : info;
     }
 
-    private void Say(string text, bool good)
-    {
-        _message.Text = text;
-        _message.Visibility = Visibility.Visible;
-        _message.Foreground = good ? Palette.Good : Palette.Danger;
-    }
+    private void Say(string text, bool good) => Flash(_message, text, good ? Palette.Good : Palette.Danger);
 
-    private void OnStartupClicked()
+    private void OnStartupChanged(bool want)
     {
         if (Loading)
         {
             return;
         }
 
-        var want = _startup.IsChecked == true;
         if (Ctx.Startup.SetEnabled(want))
         {
             Ctx.Current.General.StartWithWindows = want;

@@ -174,11 +174,19 @@ internal static class UiKit
         return grid;
     }
 
-    public static ToggleButton Switch()
+    public static ToggleButton Switch(string name)
     {
         var toggle = new ToggleButton();
+        System.Windows.Automation.AutomationProperties.SetName(toggle, name);
         UseStyle(toggle, "SwitchStyle");
         return toggle;
+    }
+
+    /// <summary>Runs <paramref name="onChange"/> whenever the switch turns on or off, however that happened (mouse, keyboard, accessibility tools).</summary>
+    public static void OnToggled(ToggleButton toggle, Action<bool> onChange)
+    {
+        toggle.Checked += (_, _) => onChange(true);
+        toggle.Unchecked += (_, _) => onChange(false);
     }
 
     public static Button MakeButton(string text, RoutedEventHandler onClick, string? style = null, double minWidth = 0)
@@ -215,6 +223,7 @@ internal static class UiKit
             TextAlignment = TextAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        System.Windows.Automation.AutomationProperties.SetName(slider, title);
         slider.ValueChanged += (_, e) => value.Text = format(e.NewValue);
 
         var grid = new Grid { Margin = new Thickness(0, 6, 0, 6) };

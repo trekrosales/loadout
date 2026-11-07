@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Threading;
 using Loadout.Settings.Model;
 
 namespace Loadout.Settings.Window;
@@ -24,9 +25,9 @@ internal sealed class AppearancePage : SectionPage
     private readonly ColorField _tint = new(s_tintPresets);
     private readonly ColorField _highlight = new(s_accentPresets);
     private readonly ColorField _dim = new(s_dimPresets);
-    private readonly ToggleButton _allMonitors = UiKit.Switch();
-    private readonly ToggleButton _marker = UiKit.Switch();
-    private readonly ToggleButton _animations = UiKit.Switch();
+    private readonly ToggleButton _allMonitors = UiKit.Switch("Darken all monitors");
+    private readonly ToggleButton _marker = UiKit.Switch("Show last-launched marker");
+    private readonly ToggleButton _animations = UiKit.Switch("Animations");
 
     public AppearancePage(SettingsContext ctx)
         : base(ctx, "Appearance", "Everything here changes the preview right away.")
@@ -38,15 +39,30 @@ internal sealed class AppearancePage : SectionPage
         var dimStrength = UiKit.SliderRow("Dim strength", AppearanceSettings.MinDimOpacity * 100, AppearanceSettings.MaxDimOpacity * 100, 1, Percent);
         _dimOpacity = dimStrength.Slider;
 
-        _iconSize.ValueChanged += (_, e) => Change(a => a.IconSize = (int)Math.Round(e.NewValue));
+        _iconSize.ValueChanged += (_, e) =>
+        {
+            if (Loading)
+            {
+                return;
+            }
+
+            // The preview follows live, but saving (which re-prepares every icon) waits for a short pause.
+            Ctx.Current.Appearance.IconSize = (int)Math.Round(e.NewValue);
+            Ctx.RefreshPreview();
+            _iconTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+            _iconTimer.Tick -= OnIconPause;
+            _iconTimer.Tick += OnIconPause;
+            _iconTimer.Stop();
+            _iconTimer.Start();
+        };
         _tintOpacity.ValueChanged += (_, e) => Change(a => a.TintOpacity = Math.Round(e.NewValue) / 100);
         _dimOpacity.ValueChanged += (_, e) => Change(a => a.DimOpacity = Math.Round(e.NewValue) / 100);
         _tint.ValueChanged += hex => Change(a => a.TintColor = hex);
         _highlight.ValueChanged += hex => Change(a => a.HighlightColor = hex);
         _dim.ValueChanged += hex => Change(a => a.DimColor = hex);
-        _allMonitors.Click += (_, _) => Change(a => a.DimAllMonitors = _allMonitors.IsChecked == true);
-        _marker.Click += (_, _) => Change(a => a.ShowLastLaunchedMarker = _marker.IsChecked == true);
-        _animations.Click += (_, _) => Change(a => a.Animations = _animations.IsChecked == true);
+        UiKit.OnToggled(_allMonitors, on => Change(a => a.DimAllMonitors = on));
+        UiKit.OnToggled(_marker, on => Change(a => a.ShowLastLaunchedMarker = on));
+        UiKit.OnToggled(_animations, on => Change(a => a.Animations = on));
 
         Body.Children.Add(UiKit.Card(UiKit.Stack(Heading("The wheel"), size.Root, opacity.Root)));
         Body.Children.Add(UiKit.Card(UiKit.Stack(
@@ -58,6 +74,25 @@ internal sealed class AppearancePage : SectionPage
             UiKit.Row("Show last-launched marker", "A small arc on the shortcut you opened most recently.", _marker),
             UiKit.Row("Animations", "Short fades and the icon pop when you aim.", _animations))));
         Reload();
+    }
+
+    private DispatcherTimer? _iconTimer;
+
+    private void OnIconPause(object? sender, EventArgs e)
+    {
+        _iconTimer?.Stop();
+        Ctx.Commit();
+    }
+
+    public override void OnWindowClosing()
+    {
+        if (_iconTimer is { IsEnabled: true })
+        {
+            _iconTimer.Stop();
+            Ctx.Commit();
+        }
+
+        base.OnWindowClosing();
     }
 
     public override void Reload()

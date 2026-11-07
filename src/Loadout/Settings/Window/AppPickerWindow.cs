@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -17,10 +17,12 @@ internal sealed class AppEntry(InstalledApp app, IIconProvider icons)
 
     public string Name { get; } = app.Name;
 
+    public override string ToString() => Name;
+
     public string Aumid { get; } = app.Aumid;
 
     public ImageSource Icon => _icon ??= icons.GetIcon(
-        new SlotSettings { Type = SlotType.App, Path = DropConverter.AppsFolderPrefix + app.Aumid }, 32);
+        new SlotSettings { Type = SlotType.App, Path = DropConverter.AppsFolderPrefix + app.Aumid }, 48);
 }
 
 /// <summary>Lists the installed apps (like the Start menu) with a search box. The list loads on a background thread.</summary>
@@ -30,6 +32,15 @@ internal sealed class AppPickerWindow : DialogShell
     private readonly ListBox _list = new();
     private readonly TextBlock _status = new();
     private readonly TextBox _search = new();
+    private readonly TextBlock _placeholder = new()
+    {
+        Text = "Search apps",
+        Foreground = Palette.FaintText,
+        FontSize = 13,
+        IsHitTestVisible = false,
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(11, 0, 0, 0),
+    };
     private readonly Button _choose;
     private ICollectionView? _view;
     private bool _closed;
@@ -39,8 +50,11 @@ internal sealed class AppPickerWindow : DialogShell
     {
         _icons = icons;
 
-        _search.Margin = new Thickness(0, 0, 0, 10);
-        _search.TextChanged += (_, _) => _view?.Refresh();
+        _search.TextChanged += (_, _) =>
+        {
+            _placeholder.Visibility = _search.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+            _view?.Refresh();
+        };
         _search.KeyDown += (_, e) =>
         {
             if (e.Key == Key.Down && _list.Items.Count > 0)
@@ -57,7 +71,7 @@ internal sealed class AppPickerWindow : DialogShell
             }
         };
 
-        _status.Text = "Loadingâ€¦";
+        _status.Text = "Loading…";
         _status.Foreground = Palette.DimText;
         _status.FontSize = 13;
         _status.HorizontalAlignment = HorizontalAlignment.Center;
@@ -94,9 +108,12 @@ internal sealed class AppPickerWindow : DialogShell
         area.Children.Add(_status);
 
         var root = new DockPanel { Margin = new Thickness(20, 16, 20, 18) };
-        DockPanel.SetDock(_search, Dock.Top);
+        var searchHost = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+        searchHost.Children.Add(_search);
+        searchHost.Children.Add(_placeholder);
+        DockPanel.SetDock(searchHost, Dock.Top);
         DockPanel.SetDock(buttons, Dock.Bottom);
-        root.Children.Add(_search);
+        root.Children.Add(searchHost);
         root.Children.Add(buttons);
         root.Children.Add(area);
         SetBody(root);

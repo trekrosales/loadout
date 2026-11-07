@@ -37,7 +37,14 @@ internal sealed class HotkeyPage : SectionPage
         _recorder.PreviewKeyUp += OnKeyUp;
         _recorder.PreviewMouseDown += OnMouseDown;
         _recorder.PreviewMouseUp += OnMouseUp;
-        _recorder.LostKeyboardFocus += (_, _) => StopRecording(cancelled: true);
+        _recorder.LostKeyboardFocus += (_, e) =>
+        {
+            // Clicking the Cancel button must not count as losing focus (it would stop, then Click would restart).
+            if (e.NewFocus != _recordButton)
+            {
+                StopRecording(cancelled: true);
+            }
+        };
         _recorder.Unloaded += (_, _) => StopRecording(cancelled: true);
 
         _recordButton = UiKit.MakeButton("Record new hotkey", (_, _) =>
@@ -51,6 +58,7 @@ internal sealed class HotkeyPage : SectionPage
                 StopRecording(cancelled: true);
             }
         }, "AccentButton");
+        _recordButton.Focusable = false;
         var reset = UiKit.MakeButton("Reset to Ctrl + Alt", (_, _) => ResetHotkey());
         reset.Margin = new Thickness(8, 0, 0, 0);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
@@ -91,8 +99,32 @@ internal sealed class HotkeyPage : SectionPage
         Loading = true;
         _delay.Value = Ctx.Current.Hotkey.HoldDelayMs;
         Loading = false;
-        ShowCaps(Ctx.Current.Hotkey.Keys);
+        ShowCurrent();
         SetRecordingLook(false);
+    }
+
+    /// <summary>True while a recording is in progress.</summary>
+    public bool IsRecording => _suspension is not null;
+
+    public override void OnWindowClosing() => StopRecording(cancelled: true);
+
+    /// <summary>Shows the hotkey that is really in effect: an invalid saved one falls back to Ctrl + Alt.</summary>
+    private void ShowCurrent()
+    {
+        var keys = Ctx.Current.Hotkey.Keys;
+        if (HotkeyRecording.Validate(keys) is null)
+        {
+            ShowCaps(keys);
+            if (_message.Foreground == Palette.Danger && _message.Text.StartsWith("Your saved", StringComparison.Ordinal))
+            {
+                Say(string.Empty, Palette.DimText);
+            }
+
+            return;
+        }
+
+        ShowCaps(["Ctrl", "Alt"]);
+        Say("Your saved hotkey wasn't valid, so Ctrl + Alt is used.", Palette.Danger);
     }
 
     private static TextBlock Spaced(TextBlock text)
@@ -129,7 +161,7 @@ internal sealed class HotkeyPage : SectionPage
         _recorder.BorderBrush = recording ? Palette.Accent : Palette.Line;
         _recorder.Background = recording ? Palette.AccentSoft : Palette.Bg;
         _recordButton.Content = recording ? "Cancel" : "Record new hotkey";
-        _hint.Text = recording ? "Press and hold your keys, then let go. Esc cancels." : string.Empty;
+        _hint.Text = recording ? "Press and hold your keys (or a middle, back or forward mouse button), then let go. Esc cancels." : string.Empty;
         _hint.Visibility = recording ? Visibility.Visible : Visibility.Collapsed;
         _hint.Margin = new Thickness(0, 10, 0, 0);
     }
@@ -160,7 +192,7 @@ internal sealed class HotkeyPage : SectionPage
         SetRecordingLook(false);
         if (cancelled)
         {
-            ShowCaps(Ctx.Current.Hotkey.Keys);
+            ShowCurrent();
         }
     }
 
@@ -278,7 +310,7 @@ internal sealed class HotkeyPage : SectionPage
         Keyboard.ClearFocus();
         if (error is not null)
         {
-            ShowCaps(Ctx.Current.Hotkey.Keys);
+            ShowCurrent();
             Say(error + " The hotkey was not changed.", Palette.Danger);
             return;
         }
@@ -291,6 +323,12 @@ internal sealed class HotkeyPage : SectionPage
 
     private void Say(string text, System.Windows.Media.Brush brush)
     {
+        if (brush == Palette.Good)
+        {
+            Flash(_message, text, brush);
+            return;
+        }
+
         _message.Text = text;
         _message.Foreground = brush;
         _message.Visibility = text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;

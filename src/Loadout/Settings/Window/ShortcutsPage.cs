@@ -19,7 +19,7 @@ internal sealed class ShortcutsPage : SectionPage
     private const double RingRadius = 128;
     private const int IconSize = 48;
 
-    private readonly StackPanel _tabs = new() { Orientation = Orientation.Horizontal };
+    private readonly WrapPanel _tabs = new();
     private readonly SlotCell[] _cells = new SlotCell[WheelMath.SlotCount];
     private readonly TextBlock _centerName = new();
     private readonly TextBlock _status = UiKit.Note(string.Empty);
@@ -34,22 +34,17 @@ internal sealed class ShortcutsPage : SectionPage
     public ShortcutsPage(SettingsContext ctx)
         : base(ctx, "Shortcuts", "Click a slot to set it, or drop apps, folders and shortcuts onto it. Drag one slot onto another to swap them.")
     {
-        var tabScroll = new ScrollViewer
-        {
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Content = _tabs,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
         var add = UiKit.MakeButton("+", (_, _) => AddGroup(), null);
         add.Padding = new Thickness(12, 5, 12, 5);
         add.FontSize = 16;
         add.ToolTip = "Add a group";
-        add.Margin = new Thickness(8, 0, 0, 0);
-        var tabRow = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
+        add.Margin = new Thickness(8, 0, 0, 6);
+        add.VerticalAlignment = VerticalAlignment.Top;
+        add.Height = 36;
+        var tabRow = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
         DockPanel.SetDock(add, Dock.Right);
         tabRow.Children.Add(add);
-        tabRow.Children.Add(tabScroll);
+        tabRow.Children.Add(_tabs);
         Body.Children.Add(tabRow);
 
         _moveLeft = Small("◀  Move left", (_, _) => MoveGroup(-1));
@@ -107,7 +102,7 @@ internal sealed class ShortcutsPage : SectionPage
                 continue;
             }
 
-            var chip = new RadioButton { Content = groups[i].Name, IsChecked = i == Ctx.SelectedGroup, ToolTip = "Double-click to rename" };
+            var chip = new RadioButton { Content = groups[i].Name, IsChecked = i == Ctx.SelectedGroup, ToolTip = "Double-click to rename", Height = 36, Margin = new Thickness(0, 0, 6, 6) };
             UiKit.UseStyle(chip, "ChipStyle");
             chip.Click += (_, _) => SelectGroup(index);
             chip.MouseDoubleClick += (_, _) => BeginRename(index);
@@ -128,8 +123,11 @@ internal sealed class ShortcutsPage : SectionPage
             Text = Ctx.Current.Groups[index].Name,
             MinWidth = 120,
             MaxLength = 40,
-            Margin = new Thickness(0, 0, 6, 0),
-            Padding = new Thickness(10, 6, 10, 6),
+            Padding = new Thickness(10, 0, 10, 0),
+            Height = 36,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 0, 6, 6),
         };
         var done = false;
         void Finish(bool save)
@@ -356,6 +354,21 @@ internal sealed class ShortcutsPage : SectionPage
                 ShowMenu(cell);
             }
         };
+        root.PreviewMouseRightButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            ShowMenu(cell);
+        };
+        root.KeyDown += (_, e) =>
+        {
+            if (e.Key is Key.Enter or Key.Space)
+            {
+                e.Handled = true;
+                ShowMenu(cell);
+            }
+        };
+        root.GotKeyboardFocus += (_, _) => cell.SetHot(true);
+        root.LostKeyboardFocus += (_, _) => cell.SetHot(false);
         root.DragEnter += (_, e) => OnDrag(cell, e);
         root.DragOver += (_, e) => OnDrag(cell, e);
         root.DragLeave += (_, _) => cell.SetHot(false);
@@ -387,11 +400,7 @@ internal sealed class ShortcutsPage : SectionPage
         Ctx.Commit();
     }
 
-    private void Say(string text, bool bad = false)
-    {
-        _status.Text = text;
-        _status.Foreground = bad ? Palette.Danger : Palette.DimText;
-    }
+    private void Say(string text, bool bad = false) => Flash(_status, text, bad ? Palette.Danger : Palette.DimText);
 
     // ---- Drag and drop ----
 
@@ -501,6 +510,7 @@ internal sealed class ShortcutsPage : SectionPage
 
         menu.Items.Add(new Separator());
         Add("Clear", () => SetSlot(index, null), slot is not null);
+        menu.Closed += (_, _) => cell.Root.ContextMenu = null;
         cell.Root.ContextMenu = menu;
         menu.IsOpen = true;
     }
@@ -569,7 +579,9 @@ internal sealed class ShortcutsPage : SectionPage
             input => UrlNormalizer.TryNormalize(input, out _) ? null : "Enter a web address such as example.com or https://example.com.");
         if (text is not null && UrlNormalizer.TryNormalize(text, out var url))
         {
-            SetSlot(index, new SlotSettings { Type = SlotType.Website, Url = url });
+            SetSlot(index, current is { Type: SlotType.Website } site
+                ? Copy(site, s => s.Url = url)
+                : new SlotSettings { Type = SlotType.Website, Url = url });
         }
     }
 
@@ -584,7 +596,7 @@ internal sealed class ShortcutsPage : SectionPage
             Owner,
             "Custom label",
             "The name shown in the middle of the wheel. Leave it empty to use the automatic name.",
-            slot.Label ?? SlotLabels.For(slot));
+            slot.Label ?? string.Empty);
         if (text is not null)
         {
             var label = string.IsNullOrWhiteSpace(text) ? null : text.Trim();
@@ -638,6 +650,8 @@ internal sealed class ShortcutsPage : SectionPage
                 BorderThickness = new Thickness(1.5),
                 BorderBrush = Brushes.Transparent,
                 Cursor = Cursors.Hand,
+                Focusable = true,
+                FocusVisualStyle = null,
                 Child = grid,
             };
         }
@@ -649,6 +663,8 @@ internal sealed class ShortcutsPage : SectionPage
         public void Show(SlotSettings? slot, ImageSource? icon, string? label)
         {
             _filled = slot is not null;
+            System.Windows.Automation.AutomationProperties.SetName(
+                Root, "Slot " + (Index + 1) + ": " + (label ?? "empty"));
             _image.Source = icon;
             _label.Text = label ?? string.Empty;
             _image.Visibility = _label.Visibility = _filled ? Visibility.Visible : Visibility.Collapsed;

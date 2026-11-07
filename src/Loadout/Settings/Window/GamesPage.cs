@@ -5,33 +5,33 @@ namespace Loadout.Settings.Window;
 /// <summary>Games section: game mode and mouse blocking (SPEC 7).</summary>
 internal sealed class GamesPage : SectionPage
 {
-    private readonly ToggleButton _gameMode = UiKit.Switch();
-    private readonly ToggleButton _block = UiKit.Switch();
+    private readonly ToggleButton _gameMode = UiKit.Switch("Game mode");
+    private readonly ToggleButton _block = UiKit.Switch("Block mouse movement in games");
 
     public GamesPage(SettingsContext ctx)
         : base(ctx, "Games", "Control how the wheel behaves over full-screen apps and games.")
     {
-        _gameMode.Click += (_, _) =>
+        UiKit.OnToggled(_gameMode, on =>
         {
             if (Loading)
             {
                 return;
             }
 
-            Ctx.Current.GameMode.Enabled = _gameMode.IsChecked == true;
+            Ctx.Current.GameMode.Enabled = on;
             _block.IsEnabled = Ctx.Current.GameMode.Enabled;
             Ctx.Commit();
-        };
-        _block.Click += (_, _) =>
+        });
+        UiKit.OnToggled(_block, on =>
         {
             if (Loading)
             {
                 return;
             }
 
-            Ctx.Current.GameMode.BlockMouseInGame = _block.IsChecked == true;
+            Ctx.Current.GameMode.BlockMouseInGame = on;
             Ctx.Commit();
-        };
+        });
 
         Body.Children.Add(UiKit.Card(UiKit.Stack(
             UiKit.Row("Game mode", "Let the wheel open over a full-screen app or game. When this is off, the wheel stays away from full-screen apps.", _gameMode, 10),
