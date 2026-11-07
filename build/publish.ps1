@@ -127,8 +127,8 @@ try {
     if (-not $iscc) {
         Write-Host ''
         Write-Host 'NOTE: The installer (Loadout-<version>-setup.exe) was NOT built.' -ForegroundColor Yellow
-        Write-Host '      Inno Setup 6 was not found (ISCC.exe is not on PATH and not in the usual folders).' -ForegroundColor Yellow
-        Write-Host '      To build it, install Inno Setup 6 (free, from https://jrsoftware.org/isdl.php)' -ForegroundColor Yellow
+        Write-Host '      Inno Setup 6.3 or later was not found (ISCC.exe is not on PATH and not in the usual folders).' -ForegroundColor Yellow
+        Write-Host '      To build it, install Inno Setup 6.3 or later (free, from https://jrsoftware.org/isdl.php)' -ForegroundColor Yellow
         Write-Host '      and run this script again. The portable zip and the exe are still ready.' -ForegroundColor Yellow
     }
     else {
