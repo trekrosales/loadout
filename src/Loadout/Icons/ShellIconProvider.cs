@@ -16,7 +16,7 @@ namespace Loadout.Icons;
 public sealed class ShellIconProvider : IIconProvider
 {
     internal const int MemoryCacheLimit = 24;
-    private const string CacheFormatVersion = "v1";
+    private const string CacheFormatVersion = "v2";
 
     private readonly Lock _memoryGate = new();
     private readonly Dictionary<string, LinkedListNode<(string Key, ImageSource Image)>> _memoryIndex = [];
@@ -26,8 +26,9 @@ public sealed class ShellIconProvider : IIconProvider
     private readonly Queue<WarmItem> _warmQueue = new();
     private readonly HashSet<string> _warmQueued = [];
     private TaskCompletionSource? _warmIdle;
+    private int _generation;
 
-    private sealed record WarmItem(SlotType Type, string? Path, string? IconPath, int Px, string FileName);
+    private sealed record WarmItem(SlotType Type, string? Path, string? IconPath, int Px, int Generation, string QueueKey);
 
     /// <summary>Number of images currently held in memory (for tests).</summary>
     internal int MemoryCount
@@ -41,6 +42,12 @@ public sealed class ShellIconProvider : IIconProvider
         }
     }
 
+    /// <summary>
+    /// Returns the icon, rendered for <paramref name="iconSize"/> DIPs. Bitmaps are 96 DPI and 2 × iconSize pixels, so the
+    /// caller must set the Image Width and Height to iconSize (otherwise WPF shows them at double size). Vector icons
+    /// (websites, fallback) are 100 × 100 units and scale to whatever Width and Height the caller sets.
+    /// Memory hits do no file access; results, including the fallback, are remembered until evicted or cleared.
+    /// </summary>
     public ImageSource GetIcon(SlotSettings slot, int iconSize)
     {
         try
@@ -48,43 +55,47 @@ public sealed class ShellIconProvider : IIconProvider
             ArgumentNullException.ThrowIfNull(slot);
             var px = ToPixels(iconSize);
 
-            if (slot.Type == SlotType.Website && !HasCustomImage(slot.IconPath))
-            {
-                return IconRenderer.CreateWebsite(slot.Url);
-            }
-
-            var fileName = CacheFileName(slot.Type, slot.Path, slot.IconPath, px);
-            var memoryKey = fileName;
-
+            var memoryKey = MemoryKey(slot.Type, slot.Path, slot.IconPath, slot.Url, px);
             var cached = GetFromMemory(memoryKey);
             if (cached is not null)
             {
                 return cached;
             }
 
-            var diskPath = System.IO.Path.Combine(AppPaths.IconCacheDirectory, fileName);
-            var fromDisk = TryLoadPng(diskPath);
-            if (fromDisk is not null)
-            {
-                PutInMemory(memoryKey, fromDisk);
-                return fromDisk;
-            }
-
-            var extracted = Extract(slot.Type, slot.Path, slot.IconPath, px);
-            if (extracted is null)
-            {
-                return IconRenderer.Fallback;
-            }
-
-            SavePng(extracted, diskPath);
-            PutInMemory(memoryKey, extracted);
-            return extracted;
+            var image = Resolve(slot, px);
+            PutInMemory(memoryKey, image);
+            return image;
         }
         catch (Exception ex)
         {
             Log.Error("Icon lookup failed; using the fallback icon.", ex);
             return IconRenderer.Fallback;
         }
+    }
+
+    private static ImageSource Resolve(SlotSettings slot, int px)
+    {
+        if (slot.Type == SlotType.Website && !HasCustomImage(slot.IconPath))
+        {
+            return IconRenderer.CreateWebsite(slot.Url);
+        }
+
+        var fileName = CacheFileName(slot.Type, slot.Path, slot.IconPath, px);
+        var diskPath = System.IO.Path.Combine(AppPaths.IconCacheDirectory, fileName);
+        var fromDisk = TryLoadPng(diskPath);
+        if (fromDisk is not null)
+        {
+            return fromDisk;
+        }
+
+        var extracted = Extract(slot.Type, slot.Path, slot.IconPath, px);
+        if (extracted is null)
+        {
+            return IconRenderer.Fallback;
+        }
+
+        SavePng(extracted, diskPath);
+        return extracted;
     }
 
     public void Warm(IEnumerable<SlotSettings> slots, int iconSize)
@@ -94,31 +105,27 @@ public sealed class ShellIconProvider : IIconProvider
             ArgumentNullException.ThrowIfNull(slots);
             var px = ToPixels(iconSize);
 
-            foreach (var slot in slots)
+            // Only raw slot data is queued here; every file-system check happens on the worker thread.
+            lock (_warmGate)
             {
-                if (slot is null)
+                foreach (var slot in slots)
                 {
-                    continue;
-                }
-
-                var custom = HasCustomImage(slot.IconPath);
-                var needsFile = slot.Type is SlotType.App or SlotType.Folder && !string.IsNullOrWhiteSpace(slot.Path);
-                if (!custom && !needsFile)
-                {
-                    continue; // websites without a custom image are vector and need no cache
-                }
-
-                var fileName = CacheFileName(slot.Type, slot.Path, slot.IconPath, px);
-                if (File.Exists(System.IO.Path.Combine(AppPaths.IconCacheDirectory, fileName)))
-                {
-                    continue;
-                }
-
-                lock (_warmGate)
-                {
-                    if (_warmQueued.Add(fileName))
+                    if (slot is null)
                     {
-                        _warmQueue.Enqueue(new WarmItem(slot.Type, slot.Path, slot.IconPath, px, fileName));
+                        continue;
+                    }
+
+                    var custom = !string.IsNullOrWhiteSpace(slot.IconPath);
+                    var shell = slot.Type is SlotType.App or SlotType.Folder && !string.IsNullOrWhiteSpace(slot.Path);
+                    if (!custom && !shell)
+                    {
+                        continue; // websites without a custom image are vector and need no cache
+                    }
+
+                    var queueKey = MemoryKey(slot.Type, slot.Path, slot.IconPath, null, px);
+                    if (_warmQueued.Add(queueKey))
+                    {
+                        _warmQueue.Enqueue(new WarmItem(slot.Type, slot.Path, slot.IconPath, px, _generation, queueKey));
                     }
                 }
             }
@@ -135,6 +142,13 @@ public sealed class ShellIconProvider : IIconProvider
     {
         try
         {
+            lock (_warmGate)
+            {
+                _warmQueue.Clear();
+                _warmQueued.Clear();
+                _generation++;
+            }
+
             lock (_memoryGate)
             {
                 _memoryIndex.Clear();
@@ -142,9 +156,30 @@ public sealed class ShellIconProvider : IIconProvider
             }
 
             var dir = AppPaths.IconCacheDirectory;
-            if (Directory.Exists(dir))
+            if (!Directory.Exists(dir))
             {
-                Directory.Delete(dir, recursive: true);
+                return;
+            }
+
+            foreach (var file in Directory.EnumerateFiles(dir))
+            {
+                try
+                {
+                    File.Delete(file);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // One stubborn file must not stop the rest.
+                }
+            }
+
+            try
+            {
+                Directory.Delete(dir, recursive: false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Something is still in there; the folder stays, which is harmless.
             }
         }
         catch (Exception ex)
@@ -180,50 +215,92 @@ public sealed class ShellIconProvider : IIconProvider
 
     private void WarmLoop()
     {
-        while (true)
+        TaskCompletionSource? done = null;
+        try
         {
-            WarmItem item;
-            lock (_warmGate)
+            while (true)
             {
-                if (!_warmQueue.TryDequeue(out item!))
+                WarmItem item;
+                lock (_warmGate)
                 {
-                    var done = _warmIdle;
-                    _warmIdle = null;
-                    done?.SetResult();
-                    return;
-                }
-            }
-
-            try
-            {
-                var diskPath = System.IO.Path.Combine(AppPaths.IconCacheDirectory, item.FileName);
-                if (!File.Exists(diskPath))
-                {
-                    var image = Extract(item.Type, item.Path, item.IconPath, item.Px);
-                    if (image is not null)
+                    if (!_warmQueue.TryDequeue(out item!))
                     {
-                        SavePng(image, diskPath);
+                        done = _warmIdle;
+                        _warmIdle = null;
+                        break;
+                    }
+                }
+
+                try
+                {
+                    WarmOne(item);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("Icon warm-up failed for one item.", ex);
+                }
+                finally
+                {
+                    lock (_warmGate)
+                    {
+                        _warmQueued.Remove(item.QueueKey);
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                Log.Error("Icon warm-up failed for one item.", ex);
-            }
-            finally
-            {
-                lock (_warmGate)
-                {
-                    _warmQueued.Remove(item.FileName);
-                }
-            }
+        }
+        finally
+        {
+            // WPF creates a Dispatcher for this thread on first use; shut it down so its handles are released.
+            System.Windows.Threading.Dispatcher.FromThread(Thread.CurrentThread)?.InvokeShutdown();
+            done?.SetResult();
         }
     }
 
-    private static int ToPixels(int iconSize) => Math.Clamp(iconSize, 1, 512) * 2;
+    private void WarmOne(WarmItem item)
+    {
+        if (item.Type == SlotType.Website && !HasCustomImage(item.IconPath))
+        {
+            return;
+        }
 
-    private static bool HasCustomImage(string? iconPath) =>
-        !string.IsNullOrWhiteSpace(iconPath) && File.Exists(iconPath);
+        var diskPath = System.IO.Path.Combine(AppPaths.IconCacheDirectory, CacheFileName(item.Type, item.Path, item.IconPath, item.Px));
+        if (File.Exists(diskPath))
+        {
+            return;
+        }
+
+        var image = Extract(item.Type, item.Path, item.IconPath, item.Px);
+        if (image is null)
+        {
+            return;
+        }
+
+        lock (_warmGate)
+        {
+            if (item.Generation != _generation)
+            {
+                return; // ClearCache ran while this icon was being made
+            }
+        }
+
+        SavePng(image, diskPath);
+    }
+
+    private static string MemoryKey(SlotType type, string? path, string? iconPath, string? url, int px) =>
+        type == SlotType.Website
+            ? $"{type}|{IconRenderer.HostOf(url)}|{iconPath}|{px}"
+            : $"{type}|{path}|{iconPath}|{px}";
+
+    private static string? ExpandCustom(string? iconPath) =>
+        string.IsNullOrWhiteSpace(iconPath) ? null : Environment.ExpandEnvironmentVariables(iconPath.Trim());
+
+    private static bool HasCustomImage(string? iconPath)
+    {
+        var expanded = ExpandCustom(iconPath);
+        return expanded is not null && File.Exists(expanded);
+    }
+
+    private static int ToPixels(int iconSize) => Math.Clamp(iconSize, 1, 512) * 2;
 
     /// <summary>Custom image first, then the shell. Null means "use the fallback".</summary>
     private static BitmapSource? Extract(SlotType type, string? path, string? iconPath, int px)
@@ -232,7 +309,7 @@ public sealed class ShellIconProvider : IIconProvider
         {
             try
             {
-                return IconRenderer.LoadCustom(iconPath!, px);
+                return IconRenderer.LoadCustom(ExpandCustom(iconPath)!, px);
             }
             catch (Exception ex)
             {

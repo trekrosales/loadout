@@ -279,6 +279,176 @@ public class ShellIconProviderTests
         });
     }
 
+    private static void WriteSolidPng(string file, int size, byte r, byte g, byte b)
+    {
+        var pixels = new byte[size * size * 4];
+        for (var i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i] = b;
+            pixels[i + 1] = g;
+            pixels[i + 2] = r;
+            pixels[i + 3] = 255;
+        }
+
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(BitmapSource.Create(size, size, 96, 96, PixelFormats.Bgra32, null, pixels, size * 4)));
+        using var stream = File.Create(file);
+        encoder.Save(stream);
+    }
+
+    private static byte[] CenterPixel(ImageSource icon)
+    {
+        var bmp = Assert.IsAssignableFrom<BitmapSource>(icon);
+        var all = ToPbgra(bmp);
+        var at = (((bmp.PixelHeight / 2) * bmp.PixelWidth) + (bmp.PixelWidth / 2)) * 4;
+        return all[at..(at + 4)];
+    }
+
+    [Fact]
+    public void Straight_alpha_shell_pixels_are_not_treated_as_premultiplied()
+    {
+        RunSta(() =>
+        {
+            // B=255 with A=128 can only be straight alpha; premultiplied it would be B=128.
+            var image = IconRenderer.FromShellPixels([255, 0, 0, 128], 1, 1, 1);
+            var pixel = ToPbgra(image);
+            Assert.InRange(pixel[0], 127, 129);
+            Assert.Equal(128, pixel[3]);
+        });
+    }
+
+    [Fact]
+    public void Changed_custom_image_gives_a_new_picture()
+    {
+        RunSta(() =>
+        {
+            var file = Path.Combine(Path.GetTempPath(), "loadout-icon-" + Guid.NewGuid().ToString("N") + ".png");
+            try
+            {
+                var slot = new SlotSettings { Type = SlotType.App, Path = s_notepad, IconPath = file };
+                WriteSolidPng(file, 10, 255, 0, 0);
+                var red = CenterPixel(new ShellIconProvider().GetIcon(slot, IconSize));
+                Assert.Equal(255, red[2]);
+
+                WriteSolidPng(file, 10, 0, 255, 0);
+                File.SetLastWriteTimeUtc(file, DateTime.UtcNow.AddMinutes(5));
+                var green = CenterPixel(new ShellIconProvider().GetIcon(slot, IconSize));
+                Assert.Equal(255, green[1]);
+                Assert.Equal(0, green[2]);
+            }
+            finally
+            {
+                File.Delete(file);
+            }
+        });
+    }
+
+    [Fact]
+    public void Different_sizes_do_not_collide()
+    {
+        RunSta(() =>
+        {
+            var provider = new ShellIconProvider();
+            var small = Assert.IsAssignableFrom<BitmapSource>(provider.GetIcon(App(s_notepad), 32));
+            var big = Assert.IsAssignableFrom<BitmapSource>(provider.GetIcon(App(s_notepad), IconSize));
+            Assert.Equal(64, small.PixelWidth);
+            Assert.Equal(Px, big.PixelWidth);
+            Assert.Equal(2, Directory.GetFiles(AppPaths.IconCacheDirectory, "*.png").Length);
+        });
+    }
+
+    [Fact]
+    public void Large_custom_image_is_decoded_to_the_target_size_and_stays_bounded()
+    {
+        RunSta(() =>
+        {
+            var file = Path.Combine(Path.GetTempPath(), "loadout-icon-" + Guid.NewGuid().ToString("N") + ".png");
+            try
+            {
+                var gray = new byte[4000 * 4000];
+                Array.Fill(gray, (byte)200);
+                var encoder = new PngBitmapEncoder();
+                encoder.Frames.Add(BitmapFrame.Create(BitmapSource.Create(4000, 4000, 96, 96, PixelFormats.Gray8, null, gray, 4000)));
+                using (var stream = File.Create(file))
+                {
+                    encoder.Save(stream);
+                }
+
+                gray = [];
+                GC.Collect();
+                var before = GC.GetTotalMemory(forceFullCollection: true);
+
+                var slot = new SlotSettings { Type = SlotType.App, Path = s_notepad, IconPath = file };
+                var image = Assert.IsAssignableFrom<BitmapSource>(new ShellIconProvider().GetIcon(slot, IconSize));
+                Assert.Equal(Px, image.PixelWidth);
+                Assert.Equal(Px, image.PixelHeight);
+                Assert.Equal(200, CenterPixel(image)[0]);
+
+                var after = GC.GetTotalMemory(forceFullCollection: true);
+                Assert.True(after - before < 100L * 1024 * 1024);
+            }
+            finally
+            {
+                File.Delete(file);
+            }
+        });
+    }
+
+    [Fact]
+    public void Custom_icon_path_may_use_environment_variables()
+    {
+        RunSta(() =>
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "loadout-icon-env-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            Environment.SetEnvironmentVariable("LOADOUT_TEST_ICON_DIR", dir);
+            try
+            {
+                WriteSolidPng(Path.Combine(dir, "i.png"), 10, 255, 0, 0);
+                var slot = new SlotSettings { Type = SlotType.Website, Url = "https://github.com", IconPath = @"%LOADOUT_TEST_ICON_DIR%\i.png" };
+                var image = new ShellIconProvider().GetIcon(slot, IconSize);
+                Assert.Equal(255, CenterPixel(image)[2]);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("LOADOUT_TEST_ICON_DIR", null);
+                Directory.Delete(dir, recursive: true);
+            }
+        });
+    }
+
+    [Fact]
+    public void Corrupt_cache_png_is_rebuilt()
+    {
+        RunSta(() =>
+        {
+            new ShellIconProvider().GetIcon(App(s_notepad), IconSize);
+            var file = Assert.Single(Directory.GetFiles(AppPaths.IconCacheDirectory, "*.png"));
+            File.WriteAllText(file, "this is not a png");
+
+            var image = Assert.IsAssignableFrom<BitmapSource>(new ShellIconProvider().GetIcon(App(s_notepad), IconSize));
+            Assert.Equal(Px, image.PixelWidth);
+
+            using var stream = File.OpenRead(file);
+            var decoded = BitmapDecoder.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+            Assert.Equal(Px, decoded.Frames[0].PixelWidth);
+        });
+    }
+
+    [Fact]
+    public void Repeated_lookups_return_the_same_cached_image_including_websites_and_fallbacks()
+    {
+        RunSta(() =>
+        {
+            var provider = new ShellIconProvider();
+            var site = new SlotSettings { Type = SlotType.Website, Url = "https://github.com" };
+            var missing = App(@"C:\nope\x.exe");
+            Assert.Same(provider.GetIcon(site, IconSize), provider.GetIcon(site, IconSize));
+            Assert.Same(provider.GetIcon(missing, IconSize), provider.GetIcon(missing, IconSize));
+            Assert.Equal(2, provider.MemoryCount);
+        });
+    }
+
     [Fact]
     public void Memory_cache_never_holds_more_than_24_images()
     {

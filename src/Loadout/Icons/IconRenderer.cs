@@ -24,57 +24,101 @@ internal static class IconRenderer
 
     public static ImageSource Fallback => s_fallback.Value;
 
-    /// <summary>Turns shell pixels (top-down BGRA) into a frozen px × px image.</summary>
+    /// <summary>
+    /// Turns shell pixels (top-down BGRA) into a frozen px × px image. The shell hands back straight (non-premultiplied)
+    /// alpha in practice, so the format is detected: if any colour channel is larger than its alpha the data cannot be
+    /// premultiplied and is read as Bgra32; otherwise it is read as Pbgra32.
+    /// </summary>
     public static BitmapSource FromShellPixels(byte[] pixels, int width, int height, int px)
     {
-        var any = false;
-        for (var i = 3; i < pixels.Length; i += 4)
-        {
-            if (pixels[i] != 0)
-            {
-                any = true;
-                break;
-            }
-        }
-
+        var anyAlpha = false;
+        var straight = false;
         for (var i = 0; i < pixels.Length; i += 4)
         {
-            if (!any)
+            var a = pixels[i + 3];
+            anyAlpha |= a != 0;
+            straight |= pixels[i] > a || pixels[i + 1] > a || pixels[i + 2] > a;
+        }
+
+        if (!anyAlpha)
+        {
+            // No alpha channel at all: the bitmap is opaque.
+            for (var i = 3; i < pixels.Length; i += 4)
             {
-                pixels[i + 3] = 255; // the bitmap has no alpha channel at all: treat as opaque
-            }
-            else if (pixels[i + 3] == 0)
-            {
-                pixels[i] = pixels[i + 1] = pixels[i + 2] = 0; // keep premultiplied data valid
+                pixels[i] = 255;
             }
         }
 
-        var bitmap = BitmapSource.Create(width, height, 96, 96, PixelFormats.Pbgra32, null, pixels, width * 4);
+        var format = straight && anyAlpha ? PixelFormats.Bgra32 : PixelFormats.Pbgra32;
+        var bitmap = BitmapSource.Create(width, height, 96, 96, format, null, pixels, width * 4);
         bitmap.Freeze();
         return FitToSquare(bitmap, px);
     }
 
+    private const long MaxCustomBytes = 20L * 1024 * 1024;
+
     /// <summary>Loads a PNG, JPG or ICO without locking the file, scaled to fit px × px.</summary>
     public static BitmapSource LoadCustom(string path, int px)
     {
-        using var stream = new MemoryStream(File.ReadAllBytes(path));
-        var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
-        if (decoder.Frames.Count == 0)
+        if (new FileInfo(path).Length > MaxCustomBytes)
         {
-            throw new InvalidDataException("The image has no frames.");
+            throw new InvalidDataException("The custom icon file is larger than 20 MB.");
         }
 
-        // Prefer the smallest frame that is at least px; otherwise the largest one.
-        BitmapFrame? best = null;
-        foreach (var frame in decoder.Frames)
+        var bytes = File.ReadAllBytes(path);
+
+        BitmapDecoder probe;
+        using (var probeStream = new MemoryStream(bytes))
         {
-            if (best is null || IsBetter(frame, best, px))
+            probe = BitmapDecoder.Create(probeStream, BitmapCreateOptions.DelayCreation | BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.None);
+            if (probe.Frames.Count == 0)
             {
-                best = frame;
+                throw new InvalidDataException("The image has no frames.");
             }
         }
 
-        return FitToSquare(best!, px);
+        if (probe is IconBitmapDecoder)
+        {
+            using var iconStream = new MemoryStream(bytes);
+            var decoder = BitmapDecoder.Create(iconStream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+
+            // Prefer the smallest frame that is at least px; otherwise the largest one.
+            BitmapFrame? best = null;
+            foreach (var frame in decoder.Frames)
+            {
+                if (best is null || IsBetter(frame, best, px))
+                {
+                    best = frame;
+                }
+            }
+
+            return FitToSquare(best!, px);
+        }
+
+        // PNG, JPG and others: decode straight to the target size so huge images stay cheap.
+        var width = probe.Frames[0].PixelWidth;
+        var height = probe.Frames[0].PixelHeight;
+        using var stream = new MemoryStream(bytes);
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.CreateOptions = BitmapCreateOptions.PreservePixelFormat;
+        image.StreamSource = stream;
+        if (Math.Max(width, height) > px)
+        {
+            if (width >= height)
+            {
+                image.DecodePixelWidth = px;
+            }
+            else
+            {
+                image.DecodePixelHeight = px;
+            }
+        }
+
+        image.EndInit();
+        image.Freeze();
+        return FitToSquare(image, px);
     }
 
     private static bool IsBetter(BitmapFrame candidate, BitmapFrame current, int px)
@@ -151,7 +195,7 @@ internal static class IconRenderer
         return s_palette[hash % (uint)s_palette.Length];
     }
 
-    private static string HostOf(string? url)
+    internal static string HostOf(string? url)
     {
         if (string.IsNullOrWhiteSpace(url))
         {

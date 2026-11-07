@@ -86,7 +86,7 @@ internal static partial class IconsNative
     private static partial bool DeleteDC(IntPtr hdc);
 
     /// <summary>
-    /// Asks the shell for an icon image. Returns top-down 32-bit BGRA pixels (usually premultiplied),
+    /// Asks the shell for an icon image. Returns top-down 32-bit BGRA pixels (straight, not premultiplied, alpha in practice),
     /// or null when the shell can't make one. Releases every COM object and the HBITMAP.
     /// </summary>
     public static (byte[] Pixels, int Width, int Height)? GetShellImage(string parsingName, int px)
