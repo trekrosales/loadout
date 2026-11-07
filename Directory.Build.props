@@ -10,5 +10,10 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <Deterministic>true</Deterministic>
+
+    <!-- Lighter: no full culture data. WPF still needs to create cultures (fonts, keyboard layouts),
+         so they're allowed, just backed by invariant data. Shared with the tests so they catch problems. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <PredefinedCulturesOnly>false</PredefinedCulturesOnly>
   </PropertyGroup>
 </Project>

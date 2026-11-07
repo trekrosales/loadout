@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -17,7 +17,6 @@
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
     <TieredPGO>true</TieredPGO>
-    <InvariantGlobalization>true</InvariantGlobalization>
     <UseSystemResourceKeys>false</UseSystemResourceKeys>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
