@@ -22,6 +22,7 @@ public sealed class AppHost : IDisposable
     private readonly ISettingsWindow _settingsWindow;
     private readonly TrayIcon _tray;
     private string? _warmedIconsSignature;
+    private string? _configuredHotkey;
     private bool _disposed;
 
     public AppHost(
@@ -49,20 +50,41 @@ public sealed class AppHost : IDisposable
 
     public void Start()
     {
-        _settings.Load();
-        _settings.Changed += OnSettingsChanged;
-
+        // The tray icon first: it needs no settings, and showing it early makes start-up feel instant.
         _tray.SettingsRequested += (_, _) => _settingsWindow.Show();
         _tray.PauseToggled += (_, paused) => _input.IsPaused = paused;
         _tray.ExitRequested += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
         _tray.Show();
 
+        _settings.Load();
+        _settings.Changed += OnSettingsChanged;
+
         _input.OpenRequested += OnOpenRequested;
-        _input.AimChanged += (_, e) => _wheel.UpdateAim(e.Dx, e.Dy);
-        _input.GroupScrolled += (_, delta) => _wheel.ChangeGroup(delta);
-        _input.SlotKeyPressed += (_, index) => _wheel.HighlightSlot(index);
+        _input.AimChanged += (_, e) =>
+        {
+            if (Log.IsTraceEnabled)
+            {
+                Log.Trace($"Aim {e.Dx:0},{e.Dy:0}");
+            }
+
+            _wheel.UpdateAim(e.Dx, e.Dy);
+        };
+        _input.GroupScrolled += (_, delta) =>
+        {
+            Log.Trace($"GroupScrolled {delta}");
+            _wheel.ChangeGroup(delta);
+        };
+        _input.SlotKeyPressed += (_, index) =>
+        {
+            Log.Trace($"SlotKeyPressed {index}");
+            _wheel.HighlightSlot(index);
+        };
         _input.Released += OnReleased;
-        _input.Cancelled += (_, _) => _wheel.Close(launch: false);
+        _input.Cancelled += (_, _) =>
+        {
+            Log.Trace("Cancelled");
+            _wheel.Close(launch: false);
+        };
         _input.Configure(_settings.Current.Hotkey);
         _input.Start();
 
@@ -96,12 +118,16 @@ public sealed class AppHost : IDisposable
         }
 
         e.BlockMouse = _gameMode.ShouldBlockMouse();
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         _wheel.Open(e.Cursor);
+        Log.Trace($"OpenRequested at {e.Cursor.X},{e.Cursor.Y} blockMouse={e.BlockMouse}, opened in "
+            + $"{System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.0} ms");
     }
 
     private void OnReleased(object? sender, EventArgs e)
     {
         var slot = _wheel.Close(launch: true);
+        Log.Trace($"Released, slot={(slot is null ? "none" : slot.Type.ToString())}");
         if (slot is null)
         {
             return;
@@ -121,7 +147,15 @@ public sealed class AppHost : IDisposable
 
     private void OnSettingsChanged(object? sender, EventArgs e)
     {
-        _input.Configure(_settings.Current.Hotkey);
+        // Saves happen on every scroll and launch too; only redo work when something relevant changed.
+        var hotkey = _settings.Current.Hotkey;
+        var hotkeySignature = string.Join('+', hotkey.Keys) + "|" + hotkey.HoldDelayMs;
+        if (hotkeySignature != _configuredHotkey)
+        {
+            _configuredHotkey = hotkeySignature;
+            _input.Configure(hotkey);
+        }
+
         WarmIconsIfNeeded();
     }
 

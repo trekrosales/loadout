@@ -44,6 +44,19 @@ public static class SettingsNormalizer
         };
     }
 
+    private static bool IsValidHotkey(List<string> keys)
+    {
+        try
+        {
+            Loadout.Input.HotkeyDefinition.Parse(keys);
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
     private static HotkeySettings NormalizeHotkey(HotkeySettings? hotkey)
     {
         if (hotkey is null)
@@ -57,7 +70,9 @@ public static class SettingsNormalizer
             .Select(k => k!.Trim())
             .ToList();
 
-        if (keys.Count == 0)
+        // An empty or unusable hotkey (an unknown key name, two letter keys, ...) falls back to Ctrl + Alt here,
+        // so the settings file and the settings window always show the hotkey that actually works.
+        if (keys.Count == 0 || !IsValidHotkey(keys))
         {
             keys = [.. DefaultModifierKeys];
         }

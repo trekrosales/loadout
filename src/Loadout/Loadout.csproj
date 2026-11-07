@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -8,7 +8,7 @@
     <AssemblyName>Loadout</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\loadout.ico</ApplicationIcon>
-    <Version>0.1.0</Version>
+    <Version>1.0.0</Version>
     <Product>Loadout</Product>
     <Description>A radial app launcher for Windows.</Description>
     <Copyright>Licensed under GPL-3.0</Copyright>
@@ -17,7 +17,6 @@
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
     <TieredPGO>true</TieredPGO>
-    <InvariantGlobalization>true</InvariantGlobalization>
     <UseSystemResourceKeys>false</UseSystemResourceKeys>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>

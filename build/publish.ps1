@@ -48,6 +48,12 @@ try {
         Fail 'dotnet was not found on PATH or in C:\Program Files\dotnet. Install the .NET 10 SDK first.'
     }
 
+    # 0. Never build a release that contains networking code (SPEC section 9).
+    Write-Host ''
+    Write-Host 'Step 0: checking that the app contains no networking code...' -ForegroundColor Cyan
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'check-no-network.ps1') -SkipAssembly
+    if ($LASTEXITCODE -ne 0) { Fail 'The no-network check failed, so no release was built.' }
+
     # 1. Publish the single-file exe.
     Write-Host ''
     Write-Host 'Step 1: publishing the single-file exe...' -ForegroundColor Cyan

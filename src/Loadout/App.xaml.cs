@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Threading;
 using Loadout.Core;
 using Loadout.GameMode;
@@ -7,6 +7,7 @@ using Loadout.Input;
 using Loadout.Launching;
 using Loadout.Settings.Store;
 using Loadout.Settings.Window;
+using Loadout.Startup;
 using Loadout.Tray;
 using Loadout.Wheel;
 
@@ -42,19 +43,21 @@ public partial class App : Application
             }
 
             var settings = new JsonSettingsStore();
-            var icons = new PlaceholderIconProvider();
-            var input = new PlaceholderInputService();
+            var icons = new ShellIconProvider();
+            var input = new LowLevelInputService();
+            var wheel = new WheelPresenter(settings, icons);
             _host = new AppHost(
                 settings,
                 input,
-                new PlaceholderWheelPresenter(),
-                new PlaceholderLauncher(),
+                wheel,
+                new ShellLauncher(),
                 icons,
-                new PlaceholderGameModePolicy(),
-                new PlaceholderSettingsWindow(),
+                new FullscreenGameModePolicy(settings),
+                new SettingsWindowService(settings, input, icons, new RunKeyStartupRegistration()),
                 new TrayIcon());
             _host.ExitRequested += (_, _) => Shutdown();
             _host.Start();
+            wheel.Prepare();
 
             _instance.ListenForOtherInstances(() => AppHost.RunOnUiThread(() => _host?.ShowSettings()));
 
