@@ -91,26 +91,97 @@ public class ShellLauncherTests
         Assert.Null(ShellLauncher.ResolveShellFolder("shell:ThisFolderDoesNotExist"));
     }
 
-    [Fact]
-    public void Shortcut_ResolvesToItsTarget()
+    private static string MakeShortcut(string folder, string name, string target)
     {
-        if (!File.Exists(Notepad))
-        {
-            return;
-        }
-
-        using var sandbox = new TestSandbox();
-        var lnk = Path.Combine(sandbox.Dir, "notepad.lnk");
+        var lnk = Path.Combine(folder, name);
         var link = (IShellLinkW)new ShellLinkCoClass();
         try
         {
-            link.SetPath(Notepad);
+            link.SetPath(target);
             ((IPersistFile)link).Save(lnk, true);
         }
         finally
         {
             Marshal.FinalReleaseComObject(link);
         }
+
+        return lnk;
+    }
+
+    [Fact]
+    public void UnknownShellFolder_Fails_AndOpensNothing()
+    {
+        using var sandbox = new TestSandbox();
+        var result = new ShellLauncher().Launch(new SlotSettings { Type = SlotType.Folder, Path = "shell:ThisFolderDoesNotExist" });
+        Assert.Equal(LaunchOutcome.Failed, result.Outcome);
+    }
+
+    [Fact]
+    public void ShortcutWithMissingTarget_Fails_WithClearMessage()
+    {
+        using var sandbox = new TestSandbox();
+        var gone = Path.Combine(sandbox.Dir, "gone", "app.exe");
+        var lnk = MakeShortcut(sandbox.Dir, "broken.lnk", gone);
+
+        var result = new ShellLauncher().Launch(new SlotSettings { Type = SlotType.App, Path = lnk });
+
+        Assert.Equal(LaunchOutcome.Failed, result.Outcome);
+        Assert.Equal("The shortcut points to something that no longer exists: " + gone, result.Message);
+    }
+
+    [Fact]
+    public void GetRealPath_OfExistingFile_ReturnsAPlainPath()
+    {
+        var real = WindowFinder.GetRealPath(Notepad);
+        Assert.NotNull(real);
+        Assert.DoesNotContain("\\\\?\\", real);
+        Assert.EndsWith("notepad.exe", real, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GetRealPath_OfMissingFile_ReturnsNull()
+    {
+        Assert.Null(WindowFinder.GetRealPath("C:\\definitely\\not\\here.exe"));
+    }
+
+    [Fact]
+    public void BuildMatchSet_SystemNotepad_UsesItsAliasWhenOneExists()
+    {
+        var alias = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WindowsApps", "notepad.exe");
+        var match = WindowFinder.BuildMatchSet(Notepad);
+        Assert.Contains(LaunchHelpers.NormalizePath(Notepad), match.Paths);
+        if (File.Exists(alias))
+        {
+            Assert.False(string.IsNullOrEmpty(match.Aumid));
+        }
+        else
+        {
+            Assert.Null(match.Aumid);
+        }
+    }
+
+    [Fact]
+    public void StartWorker_RunsWorkOnAnStaThread()
+    {
+        using var done = new ManualResetEventSlim();
+        ApartmentState? state = null;
+        StartWorker.Enqueue("test", () =>
+        {
+            state = Thread.CurrentThread.GetApartmentState();
+            done.Set();
+        });
+
+        Assert.True(done.Wait(TimeSpan.FromSeconds(5)));
+        Assert.Equal(ApartmentState.STA, state);
+    }
+
+    [Fact]
+    public void Shortcut_ResolvesToItsTarget()
+    {
+        Assert.True(File.Exists(Notepad), "This test needs " + Notepad);
+
+        using var sandbox = new TestSandbox();
+        var lnk = MakeShortcut(sandbox.Dir, "notepad.lnk", Notepad);
 
         var target = ShellLauncher.ResolveShortcutTarget(lnk);
 

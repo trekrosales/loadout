@@ -15,6 +15,18 @@ internal static partial class LaunchingNative
     internal const uint INPUT_KEYBOARD = 1;
     internal const uint KEYEVENTF_KEYUP = 2;
     internal const ushort VK_UNASSIGNED = 0xE8;
+    internal const long WS_EX_APPWINDOW = 0x40000;
+    internal const uint DWM_CLOAKED_SHELL = 2;
+
+    /// <summary>"LOAD". Must match Loadout.Input.InputNative.InjectionMarker so Loadout's input hooks ignore our own injected key.</summary>
+    internal const nint InjectionMarker = 0x4C4F4144;
+
+    internal const uint FILE_SHARE_ALL = 7;
+    internal const uint OPEN_EXISTING = 3;
+    internal const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
+    internal const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
+    internal const uint FSCTL_GET_REPARSE_POINT = 0x000900A8;
+    internal const int ERROR_INSUFFICIENT_BUFFER = 122;
     internal const int SIGDN_FILESYSPATH = unchecked((int)0x80058000);
 
     internal delegate bool EnumWindowsProc(nint hwnd, nint lParam);
@@ -33,7 +45,33 @@ internal static partial class LaunchingNative
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    internal static partial bool ShowWindow(nint hwnd, int cmd);
+    internal static partial bool ShowWindowAsync(nint hwnd, int cmd);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool IsHungAppWindow(nint hwnd);
+
+    [LibraryImport("user32.dll", EntryPoint = "FindWindowExW", StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial nint FindWindowEx(nint parent, nint after, string? className, string? title);
+
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial nint CreateFile(string name, uint access, uint share, nint security, uint disposition, uint flags, nint template);
+
+    [LibraryImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW")]
+    internal static unsafe partial uint GetFinalPathNameByHandle(nint file, char* buffer, uint length, uint flags);
+
+    [LibraryImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static unsafe partial bool DeviceIoControl(nint device, uint code, nint inBuffer, uint inSize, byte* outBuffer, uint outSize, out uint returned, nint overlapped);
+
+    [LibraryImport("kernel32.dll", EntryPoint = "GetApplicationUserModelId")]
+    internal static unsafe partial int GetApplicationUserModelId(nint process, ref uint length, char* id);
+
+    [DllImport("shell32.dll")]
+    internal static extern int SHGetPropertyStoreForWindow(nint hwnd, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
+
+    [LibraryImport("ole32.dll")]
+    internal static partial int PropVariantClear(ref PROPVARIANT value);
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -75,7 +113,7 @@ internal static partial class LaunchingNative
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool CloseHandle(nint handle);
 
-    [LibraryImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW")]
+    [LibraryImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static unsafe partial bool QueryFullProcessImageName(nint process, uint flags, char* buffer, ref uint size);
 
@@ -182,4 +220,64 @@ internal static partial class LaunchingNative
     internal class ApplicationActivationManagerCoClass
     {
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PROPERTYKEY
+    {
+        public Guid fmtid;
+        public uint pid;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PROPVARIANT
+    {
+        public ushort vt;
+        public ushort r1;
+        public ushort r2;
+        public ushort r3;
+        public nint p;
+        public nint p2;
+    }
+
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IPropertyStore
+    {
+        void GetCount(out uint count);
+        void GetAt(uint index, out PROPERTYKEY key);
+        void GetValue(ref PROPERTYKEY key, out PROPVARIANT value);
+        void SetValue(ref PROPERTYKEY key, ref PROPVARIANT value);
+        void Commit();
+    }
+
+    [ComImport, Guid("A5CD92FF-29BE-454C-8B04-D82879FB3F1B"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IVirtualDesktopManager
+    {
+        void IsWindowOnCurrentVirtualDesktop(nint hwnd, [MarshalAs(UnmanagedType.Bool)] out bool onCurrent);
+    }
+
+    [ComImport, Guid("AA509086-5CA9-4C25-8F95-589D3C07B48A")]
+    internal class VirtualDesktopManagerCoClass
+    {
+    }
+
+    [ComImport, Guid("6D5140C1-7436-11CE-8034-00AA006009FA"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IServiceProviderCom
+    {
+        [PreserveSig]
+        int QueryService(ref Guid service, ref Guid riid, out nint instance);
+    }
+
+    /// <summary>Only the first methods of IShellBrowser (same IID); we just need the tab's window.</summary>
+    [ComImport, Guid("000214E2-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IShellBrowserLite
+    {
+        void GetWindow(out nint hwnd);
+        void ContextSensitiveHelp([MarshalAs(UnmanagedType.Bool)] bool enter);
+    }
+
+    internal static readonly Guid SID_STopLevelBrowser = new("4C96BE40-915C-11CF-99D3-00AA004AE837");
+    internal static readonly Guid IID_IShellBrowser = new("000214E2-0000-0000-C000-000000000046");
+    internal static readonly Guid IID_IPropertyStore = new("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+    internal static readonly Guid ShellWindowsClsid = new("9BA05972-F6A8-11CF-A442-00A0C90A8F39");
+    internal static readonly Guid AppUserModelIdFormat = new("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
 }
