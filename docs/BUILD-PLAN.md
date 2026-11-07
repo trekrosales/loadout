@@ -83,7 +83,7 @@ Tasks in the same wave run **at the same time**. Each wave starts after the one 
 | Branch | Task | Model | Owns | Why this model |
 |---|---|---|---|---|
 | `feature/hotkey` | Low-level keyboard and mouse hooks: Ctrl+Alt hold detection, the hold delay, letting other shortcuts through, reading mouse movement and scrolling while open | **Opus** (lead) | `src/Loadout/Input/` | Subtle Windows behavior; mistakes can freeze input |
-| `feature/settings-store` | The `settings.json` model with defaults, loading and saving, recovering from a damaged file, export and import; unit tests | **Haiku** | `src/Loadout/Settings/Model/`, its tests | Straightforward data code, fully described in SPEC §10 |
+| `feature/settings-store` | The `settings.json` model with defaults, loading and saving, recovering from a damaged file, export and import; unit tests | **Haiku** | `src/Loadout/Settings/Store/`, its tests (the settings model itself is a lead-owned contract) | Straightforward data code, fully described in SPEC §10 |
 | `feature/wheel-math` | Pure math: mouse direction → slot number, the center Cancel zone, slice shapes, sizing from icon size, keeping the wheel on screen at monitor edges; unit tests | **Haiku** | `src/Loadout/Wheel/Geometry/`, its tests | Self-contained math, easy to test |
 | `chore/checks` | GitHub Actions that build and test every Pull Request, plus the **"no networking code" check** that fails the build if internet code appears | **Haiku** | `.github/`, `build/` | Short config files following a known pattern |
 
