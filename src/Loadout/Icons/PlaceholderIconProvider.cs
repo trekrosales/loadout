@@ -1,4 +1,4 @@
-﻿// PLACEHOLDER: returns a plain grey circle. Wave 2 (feature/icons) replaces it.
+// PLACEHOLDER: returns a plain grey circle. Wave 2 (feature/icons) replaces it.
 
 using System.Windows;
 using System.Windows.Media;
