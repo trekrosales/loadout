@@ -44,10 +44,11 @@ public partial class App : Application
             var settings = new JsonSettingsStore();
             var icons = new PlaceholderIconProvider();
             var input = new PlaceholderInputService();
+            var wheel = new WheelPresenter(settings, icons);
             _host = new AppHost(
                 settings,
                 input,
-                new PlaceholderWheelPresenter(),
+                wheel,
                 new PlaceholderLauncher(),
                 icons,
                 new PlaceholderGameModePolicy(),
@@ -55,6 +56,7 @@ public partial class App : Application
                 new TrayIcon());
             _host.ExitRequested += (_, _) => Shutdown();
             _host.Start();
+            wheel.Prepare();
 
             _instance.ListenForOtherInstances(() => AppHost.RunOnUiThread(() => _host?.ShowSettings()));
 
