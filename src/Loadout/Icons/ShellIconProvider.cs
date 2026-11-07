@@ -419,6 +419,11 @@ public sealed class ShellIconProvider : IIconProvider
             File.Move(temp, target, overwrite: true);
             temp = null;
         }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && File.Exists(target))
+        {
+            // Another thread wrote (or is reading) the same cache entry at the same moment. Its content is identical,
+            // since the file name is a hash of everything that affects the image, so there's nothing to do.
+        }
         catch (Exception ex)
         {
             Log.Error("Could not write an icon to the disk cache.", ex);
