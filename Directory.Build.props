@@ -1,0 +1,14 @@
+<Project>
+  <!-- Shared settings for every project in the repo. -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+</Project>
