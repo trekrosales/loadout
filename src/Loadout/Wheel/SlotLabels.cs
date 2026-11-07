@@ -8,6 +8,11 @@ namespace Loadout.Wheel;
 /// <summary>
 /// The name shown in the wheel's center for a slot: the custom label if set, otherwise a name derived from
 /// the app, folder or site. Derived names are cached per slot object so disk and shell lookups happen once.
+/// <para>
+/// Names on network paths are never looked up on the calling (UI) thread, because an offline share can take
+/// seconds: until the background lookup finishes, the file name is shown. <see cref="Warm"/> looks names up
+/// ahead of time so the wheel normally only reads the cache.
+/// </para>
 /// </summary>
 internal static class SlotLabels
 {
@@ -20,7 +25,65 @@ internal static class SlotLabels
             return slot.Label.Trim();
         }
 
+        if (s_cache.TryGetValue(slot, out var cached))
+        {
+            return cached;
+        }
+
+        if (IsPossiblySlow(slot))
+        {
+            Warm([slot]);
+            return QuickName(slot);
+        }
+
         return s_cache.GetValue(slot, Derive);
+    }
+
+    /// <summary>Looks up names for these slots on a background thread. Safe to call repeatedly.</summary>
+    public static void Warm(IEnumerable<SlotSettings> slots)
+    {
+        var pending = slots.Where(s => string.IsNullOrWhiteSpace(s.Label) && !s_cache.TryGetValue(s, out _)).ToList();
+        if (pending.Count == 0)
+        {
+            return;
+        }
+
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            foreach (var slot in pending)
+            {
+                s_cache.GetValue(slot, Derive);
+            }
+        });
+    }
+
+    /// <summary>A name that needs no disk or shell access.</summary>
+    internal static string QuickName(SlotSettings slot) =>
+        slot.Type == SlotType.Website ? SiteName(slot.Url) : LastPart(slot.Path);
+
+    /// <summary>True for paths that may touch the network (UNC paths and mapped network drives).</summary>
+    internal static bool IsPossiblySlow(SlotSettings slot)
+    {
+        var path = slot.Path;
+        if (slot.Type == SlotType.Website || string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        if (path.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        try
+        {
+            return path.Length >= 2 && path[1] == ':'
+                && new DriveInfo(path[..1]).DriveType == DriveType.Network;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     internal static string Derive(SlotSettings slot)

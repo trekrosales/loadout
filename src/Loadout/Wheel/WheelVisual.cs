@@ -23,6 +23,7 @@ internal sealed class WheelVisual : Canvas
 
     private readonly Path[] _slices = new Path[WheelMath.SlotCount];
     private readonly Path[] _markers = new Path[WheelMath.SlotCount];
+    private readonly Path[] _glows = new Path[WheelMath.SlotCount];
     private readonly Image[] _icons = new Image[WheelMath.SlotCount];
     private readonly ScaleTransform[] _iconScales = new ScaleTransform[WheelMath.SlotCount];
     private readonly Canvas _iconLayer = new() { IsHitTestVisible = false };
@@ -106,14 +107,14 @@ internal sealed class WheelVisual : Canvas
         if (previous is int p && p != slot)
         {
             AnimateIcon(p, 1.0);
+            AnimateGlow(p, 0);
         }
 
         if (slot is int s && s != previous)
         {
             AnimateIcon(s, 1.12);
+            AnimateGlow(s, 1);
         }
-
-        RefreshSliceFills();
 
         var cancel = slot is null;
         _cancelGlyph.Visibility = cancel ? Visibility.Visible : Visibility.Collapsed;
@@ -125,11 +126,22 @@ internal sealed class WheelVisual : Canvas
     {
         for (var i = 0; i < WheelMath.SlotCount; i++)
         {
-            var hot = _highlight == i;
-            _slices[i].Fill = hot ? _highlightBrush : _filled[i] ? _sliceBrush : _emptyBrush;
-            _slices[i].Stroke = hot ? _highlightPen.Brush : _edgePen.Brush;
-            _slices[i].StrokeThickness = hot ? _highlightPen.Thickness : _edgePen.Thickness;
+            _slices[i].Fill = _filled[i] ? _sliceBrush : _emptyBrush;
         }
+    }
+
+    /// <summary>The highlight is a glow layer on top of each slice that fades in and out (80 ms, SPEC 4.5).</summary>
+    private void AnimateGlow(int index, double to)
+    {
+        var glow = _glows[index];
+        if (!_animate)
+        {
+            glow.BeginAnimation(OpacityProperty, null);
+            glow.Opacity = to;
+            return;
+        }
+
+        glow.BeginAnimation(OpacityProperty, new DoubleAnimation(to, TimeSpan.FromMilliseconds(80)));
     }
 
     private void AnimateIcon(int index, double scale)
@@ -167,8 +179,10 @@ internal sealed class WheelVisual : Canvas
         var accent = ParseColor(appearance.HighlightColor, Color.FromRgb(0x8E, 0xC9, 0xE8));
         var opacity = Math.Clamp(appearance.TintOpacity, 0.3, 0.9);
 
-        _sliceBrush = Frozen(new SolidColorBrush(WithAlpha(tint, opacity)));
-        _emptyBrush = Frozen(new SolidColorBrush(WithAlpha(tint, opacity * 0.55)));
+        // Filled slices are a touch lighter than the tint and empty ones much fainter, so the difference
+        // stays visible even on a darkened screen.
+        _sliceBrush = Frozen(new SolidColorBrush(WithAlpha(Lighten(tint, 0.07), opacity)));
+        _emptyBrush = Frozen(new SolidColorBrush(WithAlpha(tint, opacity * 0.4)));
         // The highlight glows brighter toward the outer edge. Absolute mapping makes the gradient follow
         // the whole ring rather than each slice's own bounds.
         _highlightBrush = Frozen(new RadialGradientBrush(
@@ -202,9 +216,27 @@ internal sealed class WheelVisual : Canvas
 
         for (var i = 0; i < WheelMath.SlotCount; i++)
         {
-            var slice = new Path { Data = WheelMath.CreateSliceGeometry(i, m), Fill = _sliceBrush };
+            var geometry = WheelMath.CreateSliceGeometry(i, m);
+            var slice = new Path
+            {
+                Data = geometry,
+                Fill = _sliceBrush,
+                Stroke = _edgePen.Brush,
+                StrokeThickness = _edgePen.Thickness,
+            };
             _slices[i] = slice;
             Children.Add(Positioned(slice, Padding, Padding));
+
+            var glow = new Path
+            {
+                Data = geometry,
+                Fill = _highlightBrush,
+                Stroke = _highlightPen.Brush,
+                StrokeThickness = _highlightPen.Thickness,
+                Opacity = 0,
+            };
+            _glows[i] = glow;
+            Children.Add(Positioned(glow, Padding, Padding));
 
             var marker = new Path
             {
@@ -351,6 +383,11 @@ internal sealed class WheelVisual : Canvas
         freezable.Freeze();
         return freezable;
     }
+
+    private static Color Lighten(Color color, double amount) => Color.FromRgb(
+        (byte)Math.Round(color.R + ((255 - color.R) * amount)),
+        (byte)Math.Round(color.G + ((255 - color.G) * amount)),
+        (byte)Math.Round(color.B + ((255 - color.B) * amount)));
 
     private static Color WithAlpha(Color color, double alpha) =>
         Color.FromArgb((byte)Math.Round(Math.Clamp(alpha, 0, 1) * 255), color.R, color.G, color.B);

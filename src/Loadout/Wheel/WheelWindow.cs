@@ -47,6 +47,27 @@ internal sealed class WheelWindow : Window
 
     public WheelVisual Visual { get; }
 
+    /// <summary>
+    /// Refuses to close unless the app itself is shutting down: a stray close request (another tool, a window
+    /// manager) would otherwise remove the wheel for good while the app keeps running.
+    /// </summary>
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        if (!_allowClose && !Dispatcher.HasShutdownStarted)
+        {
+            e.Cancel = true;
+            HideWheel(animate: false);
+            return;
+        }
+
+        base.OnClosing(e);
+    }
+
+    /// <summary>Lets the window close (used only when the app shuts down).</summary>
+    public void AllowClose() => _allowClose = true;
+
+    private bool _allowClose;
+
     /// <summary>Creates the native window off-screen so the first open is fast.</summary>
     public void Prepare()
     {

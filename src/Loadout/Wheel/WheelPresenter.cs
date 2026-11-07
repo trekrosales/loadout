@@ -25,25 +25,22 @@ public sealed class WheelPresenter : IWheelPresenter
     private double _lastTotalX;
     private double _lastTotalY;
     private bool _animate;
+    private bool _prewarmScheduled;
 
     public WheelPresenter(ISettingsStore settings, IIconProvider icons)
     {
         _settings = settings;
         _icons = icons;
+        _settings.Changed += (_, _) => SchedulePrewarm();
     }
 
     public bool IsOpen { get; private set; }
 
-    /// <summary>Creates the windows ahead of time (off-screen) so the first open is instant.</summary>
+    /// <summary>Creates the windows ahead of time (off-screen) and pre-draws the wheel so the first open is instant.</summary>
     public void Prepare()
     {
-        _window ??= new WheelWindow();
-        _window.Prepare();
-        _window.Visual.Configure(_settings.Current.Appearance);
-        if (_dims.Count == 0)
-        {
-            _dims.Add(new DimWindow());
-        }
+        EnsureWindows();
+        SchedulePrewarm();
     }
 
     public void Open(ScreenPoint cursor)
@@ -53,45 +50,110 @@ public sealed class WheelPresenter : IWheelPresenter
             Close(launch: false);
         }
 
-        Prepare();
+        EnsureWindows();
         var settings = _settings.Current;
         var appearance = settings.Appearance;
         _animate = appearance.Animations && System.Windows.SystemParameters.ClientAreaAnimation;
 
-        var visual = _window!.Visual;
-        visual.Configure(appearance);
-
-        _groupIndex = WheelMath.WrapIndex(settings.LastGroupIndex, settings.Groups.Count);
-        _highlight = null;
-        _aimX = _aimY = _lastTotalX = _lastTotalY = 0;
-        ShowCurrentGroup(crossFade: false);
-        visual.SetHighlight(null, null);
-
-        // Place the wheel centered on the cursor, nudged to stay inside the monitor's work area.
-        var monitor = MonitorArea.FromPoint(cursor.X, cursor.Y);
-        var sizePx = (int)Math.Ceiling(visual.Size * monitor.Scale);
-        var half = sizePx / 2.0;
-        var w = monitor.Work;
-        var (cx, cy) = WheelMath.ClampCenter(cursor.X, cursor.Y, half, w.Left, w.Top, w.Right, w.Bottom);
-
-        if (appearance.DimOpacity > 0.001)
+        // Marked open first, so if anything below fails, Close can still take down whatever was shown.
+        IsOpen = true;
+        try
         {
-            var color = WheelVisual.ParseColor(appearance.DimColor, Colors.Black);
-            var monitors = appearance.DimAllMonitors ? MonitorArea.All() : [monitor];
-            while (_dims.Count < monitors.Count)
+            var visual = _window!.Visual;
+            visual.Configure(appearance);
+
+            _groupIndex = WheelMath.WrapIndex(settings.LastGroupIndex, settings.Groups.Count);
+            _highlight = null;
+            _aimX = _aimY = _lastTotalX = _lastTotalY = 0;
+            ShowCurrentGroup(crossFade: false);
+            visual.SetHighlight(null, null);
+
+            // Place the wheel centered on the cursor, nudged to stay inside the monitor's work area.
+            var monitor = MonitorArea.FromPoint(cursor.X, cursor.Y);
+            var sizePx = (int)Math.Ceiling(visual.Size * monitor.Scale);
+            var half = sizePx / 2.0;
+            var w = monitor.Work;
+            var (cx, cy) = WheelMath.ClampCenter(cursor.X, cursor.Y, half, w.Left, w.Top, w.Right, w.Bottom);
+
+            if (appearance.DimOpacity > 0.001)
             {
-                _dims.Add(new DimWindow());
+                var color = WheelVisual.ParseColor(appearance.DimColor, Colors.Black);
+                var monitors = appearance.DimAllMonitors ? MonitorArea.All() : [monitor];
+                while (_dims.Count < monitors.Count)
+                {
+                    _dims.Add(new DimWindow());
+                }
+
+                for (var i = 0; i < monitors.Count; i++)
+                {
+                    _dims[i].Cover(monitors[i], color, appearance.DimOpacity, _animate);
+                }
             }
 
-            for (var i = 0; i < monitors.Count; i++)
-            {
-                _dims[i].Cover(monitors[i], color, appearance.DimOpacity, _animate);
-            }
+            // Shown after the dim windows so it sits on top of them.
+            _window.ShowAt((int)Math.Round(cx - half), (int)Math.Round(cy - half), sizePx, _animate);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Opening the wheel failed.", ex);
+            _animate = false;
+            Close(launch: false);
+        }
+    }
+
+    private void EnsureWindows()
+    {
+        _window ??= new WheelWindow();
+        _window.Prepare();
+        if (_dims.Count == 0)
+        {
+            _dims.Add(new DimWindow());
+        }
+    }
+
+    /// <summary>
+    /// When the app is idle, draws the wheel off-screen with the group it will open on: icons loaded, text laid out,
+    /// code warmed up. Opening is then just a move and a fade. Runs at startup and after settings change.
+    /// </summary>
+    private void SchedulePrewarm()
+    {
+        if (_prewarmScheduled)
+        {
+            return;
         }
 
-        // Shown after the dim windows so it sits on top of them.
-        _window.ShowAt((int)Math.Round(cx - half), (int)Math.Round(cy - half), sizePx, _animate);
-        IsOpen = true;
+        _prewarmScheduled = true;
+        System.Windows.Application.Current?.Dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+            () =>
+            {
+                _prewarmScheduled = false;
+                Prewarm();
+            });
+    }
+
+    private void Prewarm()
+    {
+        if (IsOpen || _window is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var settings = _settings.Current;
+            _window.Visual.Configure(settings.Appearance);
+            _groupIndex = WheelMath.WrapIndex(settings.LastGroupIndex, settings.Groups.Count);
+            ShowCurrentGroup(crossFade: false);
+            _window.Visual.SetHighlight(0, "Loadout");
+            _window.Visual.SetHighlight(null, null);
+            _window.Visual.UpdateLayout();
+            SlotLabels.Warm(settings.Groups.SelectMany(g => g.Slots).OfType<SlotSettings>());
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Preparing the wheel failed.", ex);
+        }
     }
 
     public void UpdateAim(double dx, double dy)
@@ -180,6 +242,7 @@ public sealed class WheelPresenter : IWheelPresenter
         }
 
         _highlight = null;
+        SchedulePrewarm(); // ready for next time (the group may have changed)
         return chosen;
     }
 

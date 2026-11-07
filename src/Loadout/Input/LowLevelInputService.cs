@@ -30,6 +30,9 @@ public sealed class LowLevelInputService : IInputService
     private bool _paused;
     private bool _disposed;
 
+    // UI thread only: the open the UI accepted and hasn't seen end yet (0 = none).
+    private int _uiOpenId;
+
     public LowLevelInputService()
     {
         _ui = Dispatcher.CurrentDispatcher;
@@ -73,7 +76,8 @@ public sealed class LowLevelInputService : IInputService
         }
     }
 
-    public bool IsWheelOpen => _core.IsOpen;
+    /// <summary>True between an accepted <see cref="OpenRequested"/> and <see cref="Released"/> or <see cref="Cancelled"/> (UI thread).</summary>
+    public bool IsWheelOpen => _uiOpenId != 0;
 
     public void Start()
     {
@@ -122,6 +126,12 @@ public sealed class LowLevelInputService : IInputService
 
     private void RaiseOpenRequested(int openId, int x, int y) => PostToUi(() =>
     {
+        // If the UI was busy and this press already ended on the input thread, don't flash the wheel open now.
+        if (openId <= _core.EndedOpenId)
+        {
+            return;
+        }
+
         var args = new OpenRequestedEventArgs(new ScreenPoint(x, y));
         try
         {
@@ -135,18 +145,59 @@ public sealed class LowLevelInputService : IInputService
 
         var cancel = args.Cancel;
         var block = args.BlockMouse;
+        if (!cancel)
+        {
+            _uiOpenId = openId;
+            _core.FlushAimFor(openId); // movement that arrived before the UI got here
+        }
+
         _input.BeginInvoke(() => _core.ApplyOpenDecision(openId, cancel, block));
     });
 
-    private void RaiseAim(double dx, double dy) => PostToUi(() => AimChanged?.Invoke(this, new AimChangedEventArgs(dx, dy)));
+    /// <summary>Delivers aim only for the open the UI is showing, never a stale one from an earlier press.</summary>
+    private void DeliverAim(int openId, double dx, double dy)
+    {
+        if (openId == _uiOpenId && openId != 0)
+        {
+            AimChanged?.Invoke(this, new AimChangedEventArgs(dx, dy));
+        }
+    }
 
-    private void RaiseGroupScrolled(int direction) => PostToUi(() => GroupScrolled?.Invoke(this, direction));
+    private void RaiseGroupScrolled(int direction) => PostToUi(() =>
+    {
+        if (_uiOpenId != 0)
+        {
+            GroupScrolled?.Invoke(this, direction);
+        }
+    });
 
-    private void RaiseSlotKey(int index) => PostToUi(() => SlotKeyPressed?.Invoke(this, index));
+    private void RaiseSlotKey(int index) => PostToUi(() =>
+    {
+        if (_uiOpenId != 0)
+        {
+            SlotKeyPressed?.Invoke(this, index);
+        }
+    });
 
-    private void RaiseReleased() => PostToUi(() => Released?.Invoke(this, EventArgs.Empty));
+    private void RaiseReleased() => PostToUi(() =>
+    {
+        var wasOpen = _uiOpenId != 0;
+        _uiOpenId = 0;
+        if (wasOpen)
+        {
+            Released?.Invoke(this, EventArgs.Empty);
+        }
+    });
 
-    private void RaiseCancelled() => PostToUi(() => Cancelled?.Invoke(this, EventArgs.Empty));
+    private void RaiseCancelled() => PostToUi(() =>
+    {
+        var wasOpen = _uiOpenId != 0;
+        _uiOpenId = 0;
+        if (wasOpen)
+        {
+            Cancelled?.Invoke(this, EventArgs.Empty);
+        }
+    });
 
     private sealed class Suspension(LowLevelInputService owner) : IDisposable
     {
@@ -184,7 +235,10 @@ public sealed class LowLevelInputService : IInputService
 
         private double _pendingAimX;
         private double _pendingAimY;
+        private int _pendingAimOpenId;
         private bool _aimPosted;
+        private int _currentOpenId;
+        private int _endedOpenId;
 
         public InputCore(LowLevelInputService owner, Dispatcher dispatcher)
         {
@@ -198,6 +252,27 @@ public sealed class LowLevelInputService : IInputService
         }
 
         public bool IsOpen => _isOpen;
+
+        /// <summary>The newest open that has already ended on the input thread (read from the UI thread).</summary>
+        public int EndedOpenId => Volatile.Read(ref _endedOpenId);
+
+        /// <summary>UI thread: delivers the latest aim now if it belongs to <paramref name="openId"/>.</summary>
+        public void FlushAimFor(int openId)
+        {
+            double x, y;
+            lock (_aimGate)
+            {
+                if (_pendingAimOpenId != openId)
+                {
+                    return;
+                }
+
+                x = _pendingAimX;
+                y = _pendingAimY;
+            }
+
+            _owner.DeliverAim(openId, x, y);
+        }
 
         public void Start()
         {
@@ -391,11 +466,23 @@ public sealed class LowLevelInputService : IInputService
             return true;
         }
 
-        void IHotkeyEffects.OpenRequested(int openId, int x, int y) => _owner.RaiseOpenRequested(openId, x, y);
+        void IHotkeyEffects.OpenRequested(int openId, int x, int y)
+        {
+            _currentOpenId = openId;
+            _owner.RaiseOpenRequested(openId, x, y);
+        }
 
-        void IHotkeyEffects.Released() => _owner.RaiseReleased();
+        void IHotkeyEffects.Released()
+        {
+            Volatile.Write(ref _endedOpenId, _currentOpenId);
+            _owner.RaiseReleased();
+        }
 
-        void IHotkeyEffects.Cancelled() => _owner.RaiseCancelled();
+        void IHotkeyEffects.Cancelled()
+        {
+            Volatile.Write(ref _endedOpenId, _currentOpenId);
+            _owner.RaiseCancelled();
+        }
 
         void IHotkeyEffects.SlotKey(int index) => _owner.RaiseSlotKey(index);
 
@@ -408,6 +495,7 @@ public sealed class LowLevelInputService : IInputService
             {
                 _pendingAimX = dx;
                 _pendingAimY = dy;
+                _pendingAimOpenId = _currentOpenId;
                 if (_aimPosted)
                 {
                     return;
@@ -419,14 +507,17 @@ public sealed class LowLevelInputService : IInputService
             _owner.PostToUi(() =>
             {
                 double x, y;
+                int openId;
                 lock (_aimGate)
                 {
                     _aimPosted = false;
                     x = _pendingAimX;
                     y = _pendingAimY;
+                    openId = _pendingAimOpenId;
                 }
 
-                _owner.AimChanged?.Invoke(_owner, new AimChangedEventArgs(x, y));
+                // Tagged with its open, so a late message can never move the aim of a different press.
+                _owner.DeliverAim(openId, x, y);
             });
         }
 

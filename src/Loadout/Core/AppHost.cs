@@ -22,6 +22,7 @@ public sealed class AppHost : IDisposable
     private readonly ISettingsWindow _settingsWindow;
     private readonly TrayIcon _tray;
     private string? _warmedIconsSignature;
+    private string? _configuredHotkey;
     private bool _disposed;
 
     public AppHost(
@@ -145,7 +146,15 @@ public sealed class AppHost : IDisposable
 
     private void OnSettingsChanged(object? sender, EventArgs e)
     {
-        _input.Configure(_settings.Current.Hotkey);
+        // Saves happen on every scroll and launch too; only redo work when something relevant changed.
+        var hotkey = _settings.Current.Hotkey;
+        var hotkeySignature = string.Join('+', hotkey.Keys) + "|" + hotkey.HoldDelayMs;
+        if (hotkeySignature != _configuredHotkey)
+        {
+            _configuredHotkey = hotkeySignature;
+            _input.Configure(hotkey);
+        }
+
         WarmIconsIfNeeded();
     }
 

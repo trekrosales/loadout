@@ -25,6 +25,7 @@ internal sealed partial class DimWindow : IDisposable
     private const int WM_PAINT = 0x000F;
     private const int WM_NCHITTEST = 0x0084;
     private const int HTTRANSPARENT = -1;
+    private const int WM_CLOSE = 0x0010;
 
     // Kept in a static so the delegate handed to Windows is never garbage-collected.
     private static readonly WndProcDelegate s_wndProc = StaticWndProc;
@@ -81,11 +82,13 @@ internal sealed partial class DimWindow : IDisposable
             return;
         }
 
+        StopFade(); // a fade-out still running must not undo this
         SetColor(color);
         var b = monitor.Bounds;
         SetAlpha(animate ? 0 : opacity);
         SetWindowPos(_hwnd, HWND_TOPMOST, b.Left, b.Top, b.Right - b.Left, b.Bottom - b.Top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         InvalidateRect(_hwnd, 0, true);
+        UpdateWindow(_hwnd); // paint the new color before it becomes visible
         if (animate)
         {
             FadeTo(opacity, 120, park: false);
@@ -172,6 +175,8 @@ internal sealed partial class DimWindow : IDisposable
                     return 0;
                 case WM_NCHITTEST:
                     return HTTRANSPARENT;
+                case WM_CLOSE:
+                    return 0; // only Loadout itself may destroy this window (Dispose)
             }
         }
 
@@ -325,4 +330,8 @@ internal sealed partial class DimWindow : IDisposable
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool InvalidateRect(nint hwnd, nint rect, [MarshalAs(UnmanagedType.Bool)] bool erase);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool UpdateWindow(nint hwnd);
 }
