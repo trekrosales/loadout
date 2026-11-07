@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -6,6 +6,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using Loadout.Settings.Model;
 using Loadout.Wheel.Geometry;
+using Path = System.Windows.Shapes.Path;
 
 namespace Loadout.Wheel;
 
@@ -278,7 +279,7 @@ internal sealed class WheelVisual : Canvas
         var textWidth = centerRadius * 1.7;
         var nameSize = Math.Max(11, m.IconSize * 0.27);
         StyleText(_cancelGlyph, nameSize * 1.1, 0.75, FontWeights.Normal, textWidth);
-        _cancelGlyph.Text = "✕";
+        _cancelGlyph.Text = "✕"; // ✕
         StyleText(_name, nameSize, 1, FontWeights.SemiBold, textWidth);
         StyleText(_groupName, nameSize * 0.8, 0.72, FontWeights.Normal, textWidth);
         StyleText(_pager, nameSize * 0.75, 0.55, FontWeights.Normal, textWidth);
@@ -309,7 +310,7 @@ internal sealed class WheelVisual : Canvas
     }
 
     /// <summary>A thin arc just inside the outer edge of a slice, like the "equipped" marker in action games.</summary>
-    private static System.Windows.Media.Geometry MarkerGeometry(int index, WheelMetrics m)
+    private static PathGeometry MarkerGeometry(int index, WheelMetrics m)
     {
         var radius = m.OuterRadius - 3.5;
         var half = (WheelMath.SlotAngle / 2) - 6;

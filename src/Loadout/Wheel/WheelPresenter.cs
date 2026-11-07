@@ -44,8 +44,6 @@ public sealed class WheelPresenter : IWheelPresenter
         {
             _dims.Add(new DimWindow());
         }
-
-        _dims[0].Prepare();
     }
 
     public void Open(ScreenPoint cursor)

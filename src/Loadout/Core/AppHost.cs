@@ -112,8 +112,10 @@ public sealed class AppHost : IDisposable
         }
 
         e.BlockMouse = _gameMode.ShouldBlockMouse();
-        Log.Trace($"OpenRequested at {e.Cursor.X},{e.Cursor.Y} blockMouse={e.BlockMouse}");
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         _wheel.Open(e.Cursor);
+        Log.Trace($"OpenRequested at {e.Cursor.X},{e.Cursor.Y} blockMouse={e.BlockMouse}, opened in "
+            + $"{System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.0} ms");
     }
 
     private void OnReleased(object? sender, EventArgs e)
