@@ -35,7 +35,12 @@ public sealed partial class FullscreenGameModePolicy : IGameModePolicy
     internal static bool Decide(bool exclusiveFullscreen, bool fullscreen, bool gameModeEnabled) =>
         !exclusiveFullscreen && (!fullscreen || gameModeEnabled);
 
-    /// <summary>True when the window in front covers its whole monitor (and isn't the desktop or taskbar).</summary>
+    /// <summary>
+    /// True when the window in front is a borderless window covering the whole monitor the cursor is on
+    /// (and isn't the desktop or taskbar). Normal maximized windows don't count, even when they cover the monitor
+    /// because the taskbar is hidden or on another screen; and a fullscreen app on another monitor doesn't block
+    /// the wheel on this one.
+    /// </summary>
     private static bool IsForegroundFullscreen()
     {
         var hwnd = GetForegroundWindow();
@@ -44,7 +49,13 @@ public sealed partial class FullscreenGameModePolicy : IGameModePolicy
             return false;
         }
 
-        var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if (!LooksLikeFullscreenApp((long)GetWindowLongPtr(hwnd, GWL_STYLE), IsZoomed(hwnd)))
+        {
+            return false;
+        }
+
+        GetCursorPos(out var cursor);
+        var monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
         var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
         if (!GetMonitorInfo(monitor, ref info))
         {
@@ -53,6 +64,14 @@ public sealed partial class FullscreenGameModePolicy : IGameModePolicy
 
         return CoversMonitor(window, info.rcMonitor);
     }
+
+    /// <summary>Fullscreen games and videos are borderless; a window with a title bar or resize frame, or a maximized one, isn't.</summary>
+    internal static bool LooksLikeFullscreenApp(long style, bool maximized) =>
+        !maximized && (style & WS_CAPTION) != WS_CAPTION && (style & WS_THICKFRAME) == 0;
+
+    private const int GWL_STYLE = -16;
+    private const long WS_CAPTION = 0x00C00000;
+    private const long WS_THICKFRAME = 0x00040000;
 
     internal static bool CoversMonitor(RECT window, RECT monitor) =>
         window.Left <= monitor.Left && window.Top <= monitor.Top
@@ -132,8 +151,26 @@ public sealed partial class FullscreenGameModePolicy : IGameModePolicy
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool GetWindowRect(nint hwnd, out RECT rect);
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
     [LibraryImport("user32.dll")]
-    private static partial nint MonitorFromWindow(nint hwnd, uint flags);
+    private static partial nint MonitorFromPoint(POINT point, uint flags);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetCursorPos(out POINT point);
+
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static partial nint GetWindowLongPtr(nint hwnd, int index);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsZoomed(nint hwnd);
 
     [LibraryImport("user32.dll", EntryPoint = "GetMonitorInfoW")]
     [return: MarshalAs(UnmanagedType.Bool)]

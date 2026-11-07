@@ -28,6 +28,17 @@ public class GameModeDecisionTests
         Assert.False(CoversMonitor(new RECT { Left = 0, Top = 0, Right = 1920, Bottom = 1040 }, monitor)); // maximized, taskbar visible
     }
 
+    [Theory]
+    [InlineData(0x80000000L, false, true)] // WS_POPUP: a borderless game or fullscreen video
+    [InlineData(0x16CF0000L, false, false)] // normal window with title bar and resize frame
+    [InlineData(0x16CF0000L, true, false)] // maximized normal window (taskbar hidden or on another screen)
+    [InlineData(0x80000000L, true, false)] // maximized, whatever its style
+    [InlineData(0x80040000L, false, false)] // popup with a resize frame
+    public void LooksLikeFullscreenApp_OnlyBorderlessUnmaximized(long style, bool maximized, bool expected)
+    {
+        Assert.Equal(expected, LooksLikeFullscreenApp(style, maximized));
+    }
+
     [Fact]
     public void RealPolicy_AnswersQuickly()
     {

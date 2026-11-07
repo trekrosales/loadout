@@ -50,13 +50,14 @@ public sealed class AppHost : IDisposable
 
     public void Start()
     {
-        _settings.Load();
-        _settings.Changed += OnSettingsChanged;
-
+        // The tray icon first: it needs no settings, and showing it early makes start-up feel instant.
         _tray.SettingsRequested += (_, _) => _settingsWindow.Show();
         _tray.PauseToggled += (_, paused) => _input.IsPaused = paused;
         _tray.ExitRequested += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
         _tray.Show();
+
+        _settings.Load();
+        _settings.Changed += OnSettingsChanged;
 
         _input.OpenRequested += OnOpenRequested;
         _input.AimChanged += (_, e) =>

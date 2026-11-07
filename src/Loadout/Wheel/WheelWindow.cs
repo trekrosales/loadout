@@ -141,8 +141,23 @@ internal sealed class WheelWindow : Window
         _scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
     }
 
+    /// <summary>Raised once the wheel has finished hiding and is parked off-screen again.</summary>
+    public event EventHandler? Parked;
+
+    /// <summary>Gives the parked window the wheel's real size, so the first open doesn't have to resize it.</summary>
+    public void MatchSize()
+    {
+        var size = Visual.Size;
+        if (Math.Abs(Width - size) > 0.5 || Math.Abs(Height - size) > 0.5)
+        {
+            Width = Height = size;
+            _scale.CenterX = _scale.CenterY = size / 2;
+        }
+    }
+
     private void Park()
     {
+        Parked?.Invoke(this, EventArgs.Empty);
         if (_hwnd != 0)
         {
             SetWindowPos(_hwnd, 0, ParkedPosition, ParkedPosition, 0, 0, SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_NOZORDER);

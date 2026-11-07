@@ -103,7 +103,14 @@ public sealed class WheelPresenter : IWheelPresenter
 
     private void EnsureWindows()
     {
-        _window ??= new WheelWindow();
+        if (_window is null)
+        {
+            _window = new WheelWindow();
+
+            // Re-prepare only once the wheel has fully faded out, so the center text never changes mid-fade.
+            _window.Parked += (_, _) => SchedulePrewarm();
+        }
+
         _window.Prepare();
         if (_dims.Count == 0)
         {
@@ -143,6 +150,7 @@ public sealed class WheelPresenter : IWheelPresenter
         {
             var settings = _settings.Current;
             _window.Visual.Configure(settings.Appearance);
+            _window.MatchSize();
             _groupIndex = WheelMath.WrapIndex(settings.LastGroupIndex, settings.Groups.Count);
             ShowCurrentGroup(crossFade: false);
             _window.Visual.SetHighlight(0, "Loadout");
@@ -242,7 +250,6 @@ public sealed class WheelPresenter : IWheelPresenter
         }
 
         _highlight = null;
-        SchedulePrewarm(); // ready for next time (the group may have changed)
         return chosen;
     }
 

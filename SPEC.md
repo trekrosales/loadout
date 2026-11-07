@@ -1,8 +1,8 @@
 # Loadout: Specification
 
-> **Version:** 0.1 (draft for review)
+> **Version:** 1.0
 > **Last updated:** 2026-11-07
-> **Status:** being reviewed. Nothing is built yet.
+> **Status:** implemented in Loadout 1.0.
 
 This document describes what Loadout does and how it should behave. Every feature branch is built against it. If we change our minds, we update this file first, in its own Pull Request.
 
