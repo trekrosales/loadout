@@ -155,4 +155,4 @@ The exact dependencies for each task are in the wave tables above.
 ## 7. Before Wave 0 starts
 
 - [ ] This plan is approved and merged.
-- [ ] The **.NET 10 SDK** (free, from Microsoft) is installed on this PC. Building needs it, and the agents need it too.
+- [x] The **.NET 10 SDK** (free, from Microsoft) is installed on this PC. Building needs it, and the agents need it too.
