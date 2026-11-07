@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Windows;
 using System.Windows.Threading;
 using Loadout.Contracts;
@@ -58,11 +58,27 @@ public sealed class AppHost : IDisposable
         _tray.Show();
 
         _input.OpenRequested += OnOpenRequested;
-        _input.AimChanged += (_, e) => _wheel.UpdateAim(e.Dx, e.Dy);
-        _input.GroupScrolled += (_, delta) => _wheel.ChangeGroup(delta);
-        _input.SlotKeyPressed += (_, index) => _wheel.HighlightSlot(index);
+        _input.AimChanged += (_, e) =>
+        {
+            Log.Trace($"Aim {e.Dx:0},{e.Dy:0}");
+            _wheel.UpdateAim(e.Dx, e.Dy);
+        };
+        _input.GroupScrolled += (_, delta) =>
+        {
+            Log.Trace($"GroupScrolled {delta}");
+            _wheel.ChangeGroup(delta);
+        };
+        _input.SlotKeyPressed += (_, index) =>
+        {
+            Log.Trace($"SlotKeyPressed {index}");
+            _wheel.HighlightSlot(index);
+        };
         _input.Released += OnReleased;
-        _input.Cancelled += (_, _) => _wheel.Close(launch: false);
+        _input.Cancelled += (_, _) =>
+        {
+            Log.Trace("Cancelled");
+            _wheel.Close(launch: false);
+        };
         _input.Configure(_settings.Current.Hotkey);
         _input.Start();
 
@@ -96,12 +112,14 @@ public sealed class AppHost : IDisposable
         }
 
         e.BlockMouse = _gameMode.ShouldBlockMouse();
+        Log.Trace($"OpenRequested at {e.Cursor.X},{e.Cursor.Y} blockMouse={e.BlockMouse}");
         _wheel.Open(e.Cursor);
     }
 
     private void OnReleased(object? sender, EventArgs e)
     {
         var slot = _wheel.Close(launch: true);
+        Log.Trace($"Released, slot={(slot is null ? "none" : slot.Type.ToString())}");
         if (slot is null)
         {
             return;
