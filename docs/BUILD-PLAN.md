@@ -6,7 +6,8 @@
 
 This plan splits building Loadout among several AI agents:
 
-- **Claude Opus** is the lead. It plans, builds the tricky core and checks everyone's work.
+- **Claude Opus** is the lead. It plans, builds the tricky core, starts every agent and merges finished work.
+- A separate **reviewer agent** checks and tests every piece before it's merged.
 - **Haiku**, the smallest and cheapest model, does the simple, repetitive tasks.
 - **Sonnet**, the middle model, does the medium-difficulty tasks.
 
@@ -18,7 +19,7 @@ This plan splits building Loadout among several AI agents:
 
 | Benefit | Cost |
 |---|---|
-| **Cheaper.** Simple tasks run on Haiku, which costs a fraction of Opus. | **Review time.** The lead has to check every agent's work, because cheaper models make more mistakes. |
+| **Cheaper.** Simple tasks run on Haiku, which costs a fraction of Opus. | **Review time.** Every agent's work must be checked by a reviewer agent, because cheaper models make more mistakes. |
 | **Faster.** Independent tasks are built at the same time instead of one after another. | **Planning first.** Agents can't see each other's work, so the lead must define exactly how the pieces connect before anyone starts. |
 | **Each task is its own Pull Request,** which fits our one-branch-per-feature workflow. | **Some work can't be split.** The hotkey, the wheel window and game mode are tightly connected and easy to get subtly wrong, so they stay with the lead. |
 
@@ -33,6 +34,7 @@ The project is small (an estimated 3,000–5,000 lines of code), so the gain is 
 | **Lead** | Opus | Project setup, the connections between parts, hotkey and mouse hooks, the wheel window, game mode, performance tuning, **reviewing and merging every Pull Request** |
 | **Builder** | Sonnet | Medium tasks with some Windows-specific code: launching and switching apps, icons, groups, the settings window |
 | **Helper** | Haiku | Simple, well-defined, repetitive tasks: the settings file, wheel math, automated checks, the installer script, documentation |
+| **Reviewer & tester** | Always **one level above the builder**: Sonnet checks Haiku's work, Opus checks Sonnet's work, and a separate fresh Opus checks the lead's own work | Reviews every branch against SPEC.md, runs the build and tests, launches the app and tests it (see §3a). It never reviews its own work. |
 
 **Escalation rule:** if an agent's work fails review **twice**, the task moves up one level (Haiku → Sonnet → Opus).
 
@@ -44,8 +46,23 @@ The project is small (an estimated 3,000–5,000 lines of code), so the gain is 
 2. **Each agent gets its own copy of the project** (a *git worktree*) on its own branch. Agents can't overwrite each other's files.
 3. **Each agent owns specific folders** (see the tables below) and doesn't edit outside them. If it needs a change elsewhere, it reports back instead.
 4. **Each agent must:** build without errors, pass its own tests and the automated checks, then push its branch.
-5. **The lead reviews every branch,** fixes or sends back problems, and opens the Pull Request. **You approve each merge**, as with the spec.
+5. **A reviewer agent checks every branch** (see §3a). Problems go back to the builder. Once the review passes, the lead opens the Pull Request and **merges it**, with a plain-language summary and the review result in the description. You don't need to approve each merge.
 6. **No more than 4 agents at once,** to keep reviews manageable.
+7. **The lead starts every agent itself.** You don't create sessions or run anything; all agents show in the session's agent list if you want to watch.
+
+### 3a. How work is reviewed and tested
+
+Every branch must pass all of these before it's merged:
+
+| Check | Done by | What it catches |
+|---|---|---|
+| **Build and unit tests** | GitHub Actions, automatically on every Pull Request | Code that doesn't compile, broken logic, failed tests |
+| **"No internet code" check** | GitHub Actions | Any networking code sneaking in |
+| **Code review against SPEC.md** | Reviewer agent | Missing features, wrong behavior, risky code, files edited outside the agent's folders |
+| **Hands-on test** | Reviewer agent | Launches the real app, simulates the hotkey and mouse, takes screenshots to check the wheel's look, and confirms it opens the right things |
+| **Performance check** (waves 2–4) | Reviewer agent | Idle CPU, GPU and memory against SPEC §8 |
+
+Some things only a person can judge, such as how the wheel *feels* and how it behaves inside real games. Those are saved for one short checklist for you at the end (§6).
 
 ---
 
@@ -128,9 +145,10 @@ The exact dependencies for each task are in the wave tables above.
 
 ## 6. What you'll do
 
-- **Approve each Pull Request** when the lead says it's ready. Each one explains in plain language what it adds.
-- **Try test versions** after waves 2, 3 and 4 and say what feels off.
-- You never need to run git commands or write code.
+- **Nothing until the end.** The lead runs every wave, review and merge.
+- **At the end:** a short hands-on checklist (about 10 minutes) to try the finished app. It covers the feel of the wheel, your real apps and a game if you play one. Anything that feels off becomes a fix before v1.0 is published.
+- **Only if needed:** the lead stops and asks you if a decision comes up that SPEC.md doesn't answer.
+- You never need to run git commands, create sessions or write code.
 
 ---
 
