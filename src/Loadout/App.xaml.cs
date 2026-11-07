@@ -42,7 +42,7 @@ public partial class App : Application
             }
 
             var settings = new JsonSettingsStore();
-            var icons = new PlaceholderIconProvider();
+            var icons = new ShellIconProvider();
             var input = new LowLevelInputService();
             var wheel = new WheelPresenter(settings, icons);
             _host = new AppHost(
